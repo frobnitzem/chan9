@@ -138,8 +138,9 @@ func dirtostr(d *p.Dir) string {
 	return fmt.Sprintf("%s %s %s %-8d\t\t%s", modetostr(d.Mode), d.Uid, d.Gid, d.Length, d.Name)
 }
 
-func lsone(c *clnt.Clnt, s string, long bool) {
-	st, oserr := c.FStat(normpath(s))
+func lsone(c *clnt.Clnt, path string, long bool) {
+	s := normpath(path)
+	st, oserr := c.FStat(s)
 	if oserr != nil {
 		fmt.Fprintf(os.Stderr, "error stat: %v\n", oserr)
 		return
@@ -182,7 +183,7 @@ func cmdls(c *clnt.Clnt, s []string) {
 		lsone(c, cwd, long)
 	} else {
 		for _, d := range s {
-			lsone(c, cwd+d, long)
+			lsone(c, d, long)
 		}
 	}
 }
@@ -191,12 +192,12 @@ func walkone(c *clnt.Clnt, s string, fileok bool) {
 	ncwd := normpath(s)
 
 	fid, err := c.FWalk(ncwd)
-	defer c.Clunk(fid)
 
-	if err != nil {
+	if err != nil { // FWalk clunk-s the newfid for us.
 		fmt.Fprintf(os.Stderr, "walk error: %s\n", err)
 		return
 	}
+	defer c.Clunk(fid)
 
 	if fileok != true && (fid.Type&p.QTDIR == 0) {
 		fmt.Fprintf(os.Stderr, "can't cd to file [%s]\n", ncwd)
