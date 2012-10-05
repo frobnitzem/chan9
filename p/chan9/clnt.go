@@ -41,7 +41,7 @@ type Clnt struct {
 	Log        *p.Logger
 
 	conn     net.Conn
-	tagpool  *pool
+	tagpool  *pool // point to pools of parent ns.
 	fidpool  *pool
 	reqout   chan *Req
 	done     chan bool
@@ -55,35 +55,7 @@ type Clnt struct {
 	next, prev *Clnt
 }
 
-// A Fid type represents a file on the server. Fids are used for the
-// low level methods that correspond directly to the 9P2000 message requests
-type Fid struct {
-	sync.Mutex
-	Clnt   *Clnt // Client the fid belongs to
-	Iounit uint32
-	Type uint16   // Channel type (index of function call table)
-	Dev uint32    // Server or device number distinguishing the server from others of the same type
-	p.Qid         // The Qid description for the file
-	Mode   uint8  // Open mode (one of p.O* values) (if file is open)
-	Fid    uint32 // Fid number
-	p.User        // The user the fid belongs to
-	walked bool   // true if the fid points to a walked file on the server
-}
-
-// The file is similar to the Fid, but is used in the high-level client
-// interface.
-type File struct {
-	fid    *Fid
-	offset uint64
-}
-
-type pool struct {
-	sync.Mutex
-	need  int
-	nchan chan uint32
-	maxid uint32
-	imap  []byte
-}
+var clnts *ClntList
 
 type Req struct {
 	sync.Mutex
@@ -97,12 +69,6 @@ type Req struct {
 	fid        *Fid
 }
 
-type ClntList struct {
-	sync.Mutex
-	clntList, clntLast *Clnt
-}
-
-var clnts *ClntList
 var DefaultDebuglevel int
 var DefaultLogger *p.Logger
 
@@ -330,15 +296,15 @@ func (clnt *Clnt) send() {
 
 // Creates and initializes a new Clnt object. Doesn't send any data
 // on the wire.
-func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
+func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt := new(Clnt)
 	clnt.conn = c
 	clnt.Msize = msize
 	clnt.Dotu = dotu
 	clnt.Debuglevel = DefaultDebuglevel
 	clnt.Log = DefaultLogger
-	clnt.tagpool = newPool(uint32(p.NOTAG))
-	clnt.fidpool = newPool(p.NOFID)
+	clnt.tagpool = ns.tagpool
+	clnt.fidpool = ns.fidpool
 	clnt.reqout = make(chan *Req)
 	clnt.done = make(chan bool)
 	clnt.reqchan = make(chan *Req, 16)
@@ -347,16 +313,16 @@ func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	go clnt.recv()
 	go clnt.send()
 
-	clnts.Lock()
-	if clnts.clntLast != nil {
-		clnts.clntLast.next = clnt
+	ns.clnts.Lock()
+	if ns.clnts.clntLast != nil {
+		ns.clnts.clntLast.next = clnt
 	} else {
-		clnts.clntList = clnt
+		ns.clnts.clntList = clnt
 	}
 
-	clnt.prev = clnts.clntLast
-	clnts.clntLast = clnt
-	clnts.Unlock()
+	clnt.prev = ns.clnts.clntLast
+	ns.clnts.clntLast = clnt
+	ns.clnts.Unlock()
 
 	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
 		sop.statsRegister()
@@ -368,8 +334,8 @@ func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 // Establishes a new socket connection to the 9P server and creates
 // a client object for it. Negotiates the dialect and msize for the
 // connection. Returns a Clnt object, or Error.
-func Connect(c net.Conn, msize uint32, dotu bool) (*Clnt, error) {
-	clnt := NewClnt(c, msize, dotu)
+func (ns *Namespace) Connect(c net.Conn, msize uint32, dotu bool) (*Clnt, error) {
+	clnt := ns.NewClnt(c, msize, dotu)
 	clnt.Id = c.RemoteAddr().String() + ":"
 	ver := "9P2000"
 	if clnt.Dotu {
@@ -468,9 +434,9 @@ func (clnt *Clnt) logFcall(fc *p.Fcall) {
 	}
 }
 
-func init() {
-	clnts = new(ClntList)
-	if sop, ok := (interface{}(clnts)).(StatsOps); ok {
+func (ns *Namespace) cl_init() {
+	ns.clnts = new(ClntList)
+	if sop, ok := (interface{}(ns.clnts)).(StatsOps); ok {
 		sop.statsRegister()
 	}
 }

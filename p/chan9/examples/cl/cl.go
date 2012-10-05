@@ -443,8 +443,8 @@ func interactive(c *clnt.Clnt) {
 func main() {
 	var user p.User
 	var err error
-	var c *clnt.Clnt
-	var file *clnt.File
+	var ns *chan9.Namespace
+	var file *chan9.File
 
 	flag.Parse()
 
@@ -458,7 +458,7 @@ func main() {
 	if strings.LastIndex(naddr, ":") == -1 {
 		naddr = naddr + ":5640"
 	}
-	c, err = clnt.Mount("tcp", naddr, "", user)
+	ns, err = chan9.NameNS("tcp!"+naddr, "", user)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", naddr, err)
 		os.Exit(1)

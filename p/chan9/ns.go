@@ -1,5 +1,11 @@
 package chan9
 
+import (
+	"code.google.com/p/go9p/p"
+	"net"
+	"sync"
+)
+
 /*
 type NsOps interface {
         //ChanOps
@@ -53,16 +59,68 @@ type NSElem struct {
 // The top-level namespace keeps track
 // of the mounted p9 clients and the user's fid-s.
 type Namespace struct {
-	Root *NSElem // This one must be of type NS_MOUNT, else there is no
+	Tree *NSElem // This one must be of type NS_MOUNT, else there is no
 			// server to accept 9p messages.
+	clnts *ClntList
+	sync.Mutex
+	Debuglevel int    // =0 don't print anything, >0 print Fcalls, >1 print raw packets
+	Root       *Fid   // Fid that points to the root directory
+	Id         string // Used when printing debug messages
+	Log        *p.Logger
 
+	conn     net.Conn
+	tagpool  *pool
+	fidpool  *pool
+	reqout   chan *Req
+	done     chan bool
+	reqfirst *Req
+	reqlast  *Req
+	err      error
+
+	reqchan chan *Req
+	tchan   chan *p.Fcall
 }
 
 
 // List of path elements.
 type Elemlist struct {
-        elems []string
-        mustbedir bool
+        Elem []string
+        Mustbedir bool
+}
+
+// A Fid type represents a file on the server. Fids are used for the
+// low level methods that correspond directly to the 9P2000 message requests
+type Fid struct {
+	sync.Mutex
+	Clnt   *Clnt // Client the fid belongs to
+	Iounit uint32
+	Type uint16   // Channel type (index of function call table)
+	Dev uint32    // Server or device number distinguishing the server from others of the same type
+	p.Qid         // The Qid description for the file
+	Mode   uint8  // Open mode (one of p.O* values) (if file is open)
+	Fid    uint32 // Fid number
+	p.User        // The user the fid belongs to
+	walked bool   // true if the fid points to a walked file on the server
+}
+
+// The file is similar to the Fid, but is used in the high-level client
+// interface.
+type File struct {
+	fid    *Fid
+	offset uint64
+}
+
+type pool struct {
+	sync.Mutex
+	need  int
+	nchan chan uint32
+	maxid uint32
+	imap  []byte
+}
+
+type ClntList struct {
+	sync.Mutex
+	clntList, clntLast *Clnt
 }
 
 
@@ -70,33 +128,60 @@ type Elemlist struct {
  * Create sub-slices of the names, breaking on '/'.
  * An empty string will give a nil nelem set.
  * A path ending in / or /. or /.//./ etc. will have
- * e.mustbedir = 1, so that we correctly
+ * e.Mustbedir = 1, so that we correctly
  * reject, e.g., "/adm/users/." when /adm/users is a file
  * rather than a directory.
  */
-func Parsepath(name string) (e Elemlist) {
-        e.elems = make([]string, 0)
-        e.mustbedir = true // skip leading slash-dots
+/* Cleanname is analogous to the URL-cleaning rules defined in RFC 1808
+   [Field95], although the rules are slightly different. Cleanname iteratively
+   does the following until no further processing can be done: 
+   1. Reduce multiple slashes to a single slash.
+   2. Eliminate . path name elements (the current directory).
+   3. Eliminate .. path name elements (the parent directory) and the non-. non-.., element that precedes them.
+   4. Eliminate .. elements that begin a rooted path, that is, replace /.. by / at the beginning of a path.
+   5. Leave intact .. elements that begin a non-rooted path.
+   If the result of this process is a null string, cleanname returns the string ".", representing the current directory. 
+ */
+func Parsename(name string) (e Elemlist) {
+        e.Elem = make([]string, 0)
+        e.Mustbedir = true // skip leading slash-dots
+	rooted := name[0] == '/'
         n := 0
+
+	addelem := func (s string) {
+		if s == ".." {
+			if l := len(e.Elem); l > 0 {
+				if e.Elem[l-1] != ".." {
+					e.Elem = e.Elem[:l-1]
+					return
+				}
+			} else if rooted {
+				return // skip if rooted
+			}
+		}
+		e.Elem = append(e.Elem, s)
+	}
         for i, c := range name {
-                if e.mustbedir {
+                if e.Mustbedir {
                         if c != '/' {
                                 if c != '.' || (len(name) > i+1 && name[i+1] != '/') {
-                                        e.mustbedir = false
+                                        e.Mustbedir = false
                                         n = i
                                 }
                         }
-                } else if c == '/' { // plan 7roll
-                        /*if name[n:i] == ".." {
-                                if l := len(e.elems); l > 0 {
-                                        e.elems = e.elems[:l-1] }
-                        } else {*/ // kill ".."
-                        e.elems = append(e.elems, name[n:i])
-                        e.mustbedir = true
+                } else if c == '/' {
+                        e.Mustbedir = true
+			addelem(name[n:i])
                 }
         }
-        if i := len(name); !e.mustbedir && i > 0 {
-                e.elems = append(e.elems, name[n:i])
+        if i := len(name); !e.Mustbedir && i > 0 {
+		if name[n:i] == ".." {
+			e.Mustbedir = true }
+		addelem(name[n:i])
         }
+	if l := len(e.Elem); l == 0 {
+		e.Elem = append(e.Elem, ".")
+	}
+	return
 }
 
