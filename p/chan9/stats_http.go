@@ -1,7 +1,7 @@
 package chan9
 
 import (
-	"code.google.com/p/go9p/p"
+	//"code.google.com/p/go9p/p"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +12,7 @@ func (clnt *Clnt) ServeHTTP(c http.ResponseWriter, r *http.Request) {
 	defer io.WriteString(c, "</body></html>")
 
 	// fcalls
-	if clnt.Debuglevel&DbgLogFcalls != 0 {
+	/*if clnt.Debuglevel&DbgLogFcalls != 0 {
 		fs := clnt.Log.Filter(clnt, DbgLogFcalls)
 		io.WriteString(c, fmt.Sprintf("<h2>Last %d 9P messages</h2>", len(fs)))
 		for _, l := range fs {
@@ -21,20 +21,20 @@ func (clnt *Clnt) ServeHTTP(c http.ResponseWriter, r *http.Request) {
 				io.WriteString(c, fmt.Sprintf("<br>%s", fc))
 			}
 		}
-	}
+	}*/
 }
 
-func clntServeHTTP(c http.ResponseWriter, r *http.Request) {
+func (clnts *ClntList) ServeHTTP(c http.ResponseWriter, r *http.Request) {
 	io.WriteString(c, fmt.Sprintf("<html><body>"))
 	defer io.WriteString(c, "</body></html>")
 
 	clnts.Lock()
-	if clnts.clntList == nil {
+	if len(clnts.c) == 0 {
 		io.WriteString(c, "no clients")
 	}
 
-	for clnt := clnts.clntList; clnt != nil; clnt = clnt.next {
-		io.WriteString(c, fmt.Sprintf("<a href='/go9p/clnt/%s'>%s</a><br>", clnt.Id, clnt.Id))
+	for dev, clnt := range clnts.c {
+		io.WriteString(c, fmt.Sprintf("<a href='/go9p/clnt/%s'>%s(%d)</a><br>", clnt.Id, clnt.Id,dev))
 	}
 	clnts.Unlock()
 }
@@ -48,9 +48,9 @@ func (clnt *Clnt) statsUnregister() {
 }
 
 func (c *ClntList) statsRegister() {
-	http.HandleFunc("/go9p/clnt", clntServeHTTP)
+	http.Handle("/go9p/clnt", c)
 }
 
 func (c *ClntList) statsUnregister() {
-	http.HandleFunc("/go9p/clnt", nil)
+	http.Handle("/go9p/clnt", nil)
 }

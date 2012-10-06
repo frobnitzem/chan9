@@ -15,33 +15,22 @@ import (
 	"syscall"
 )
 
-// Debug flags
-const (
-	DbgPrintFcalls  = (1 << iota) // print all 9P messages on stderr
-	DbgPrintPackets               // print the raw packets on stderr
-	DbgLogFcalls                  // keep the last N 9P messages (can be accessed over http)
-	DbgLogPackets                 // keep the last N 9P messages (can be accessed over http)
-)
-
-type StatsOps interface {
-	statsRegister()
-	statsUnregister()
-}
-
 // The Clnt type represents a 9P2000 client. The client is connected to
 // a 9P2000 file server and its methods can be used to access and manipulate
 // the files exported by the server.
 type Clnt struct {
 	sync.Mutex
-	Debuglevel int    // =0 don't print anything, >0 print Fcalls, >1 print raw packets
 	Msize      uint32 // Maximum size of the 9P messages
 	Dotu       bool   // If true, 9P2000.u protocol is spoken
+	Cname      []string // "root" to begin requests from the channel
+        Type uint16 // Although "ChanOps" interface deprecates
+                        // the Type field, it could be informative.
+        Dev uint32 // Device number for this channel
 	Root       *Fid   // Fid that points to the root directory
 	Id         string // Used when printing debug messages
-	Log        *p.Logger
 
 	conn     net.Conn
-	tagpool  *pool // point to pools of parent ns.
+	tagpool  *pool // points to pool of parent Namespace
 	fidpool  *pool
 	reqout   chan *Req
 	done     chan bool
@@ -52,10 +41,8 @@ type Clnt struct {
 	reqchan chan *Req
 	tchan   chan *p.Fcall
 
-	next, prev *Clnt
+	ref int // ref count.
 }
-
-var clnts *ClntList
 
 type Req struct {
 	sync.Mutex
@@ -68,9 +55,6 @@ type Req struct {
 	prev, next *Req
 	fid        *Fid
 }
-
-var DefaultDebuglevel int
-var DefaultLogger *p.Logger
 
 func (clnt *Clnt) Rpcnb(r *Req) error {
 	var tag uint16
@@ -118,7 +102,7 @@ func (clnt *Clnt) Rpc(tc *p.Fcall) (rc *p.Fcall, err error) {
 	return
 }
 
-func (clnt *Clnt) recv() {
+func (ns *Namespace) recv(clnt *Clnt) {
 	var err error
 
 	err = nil
@@ -164,14 +148,14 @@ func (clnt *Clnt) recv() {
 				goto closed
 			}
 
-			if clnt.Debuglevel > 0 {
-				clnt.logFcall(fc)
-				if clnt.Debuglevel&DbgPrintPackets != 0 {
-					log.Println("}-}", clnt.Id, fmt.Sprint(fc.Pkt))
+			if ns.Debuglevel > 0 {
+				ns.logFcall(fc)
+				if ns.Debuglevel&DbgPrintPackets != 0 {
+					log.Println("}-}", ns.Id, fmt.Sprint(fc.Pkt))
 				}
 
-				if clnt.Debuglevel&DbgPrintFcalls != 0 {
-					log.Println("}}}", clnt.Id, fc.String())
+				if ns.Debuglevel&DbgPrintFcalls != 0 {
+					log.Println("}}}", ns.Id, fc.String())
 				}
 			}
 
@@ -243,39 +227,29 @@ closed:
 		}
 	}
 
-	clnts.Lock()
-	if clnt.prev != nil {
-		clnt.prev.next = clnt.next
-	} else {
-		clnts.clntList = clnt.next
-	}
-
-	if clnt.next != nil {
-		clnt.next.prev = clnt.prev
-	} else {
-		clnts.clntLast = clnt.prev
-	}
-	clnts.Unlock()
+	ns.clnts.Lock()
+        delete(ns.clnts.c, clnt.Dev)
+	ns.clnts.Unlock()
 
 	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
 		sop.statsUnregister()
 	}
 }
 
-func (clnt *Clnt) send() {
+func (ns *Namespace) send(clnt *Clnt) {
 	for {
 		select {
 		case <-clnt.done:
 			return
 
 		case req := <-clnt.reqout:
-			if clnt.Debuglevel > 0 {
-				clnt.logFcall(req.Tc)
-				if clnt.Debuglevel&DbgPrintPackets != 0 {
+			if ns.Debuglevel > 0 {
+				ns.logFcall(req.Tc)
+				if ns.Debuglevel&DbgPrintPackets != 0 {
 					log.Println("{-{", clnt.Id, fmt.Sprint(req.Tc.Pkt))
 				}
 
-				if clnt.Debuglevel&DbgPrintFcalls != 0 {
+				if ns.Debuglevel&DbgPrintFcalls != 0 {
 					log.Println("{{{", clnt.Id, req.Tc.String())
 				}
 			}
@@ -301,8 +275,6 @@ func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt.conn = c
 	clnt.Msize = msize
 	clnt.Dotu = dotu
-	clnt.Debuglevel = DefaultDebuglevel
-	clnt.Log = DefaultLogger
 	clnt.tagpool = ns.tagpool
 	clnt.fidpool = ns.fidpool
 	clnt.reqout = make(chan *Req)
@@ -310,18 +282,13 @@ func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt.reqchan = make(chan *Req, 16)
 	clnt.tchan = make(chan *p.Fcall, 16)
 
-	go clnt.recv()
-	go clnt.send()
+	go ns.recv(clnt)
+	go ns.send(clnt)
 
 	ns.clnts.Lock()
-	if ns.clnts.clntLast != nil {
-		ns.clnts.clntLast.next = clnt
-	} else {
-		ns.clnts.clntList = clnt
-	}
-
-	clnt.prev = ns.clnts.clntLast
-	ns.clnts.clntLast = clnt
+	clnt.Dev = ns.clnts.nextdev
+	ns.clnts.c[clnt.Dev] = clnt
+	ns.clnts.nextdev++
 	ns.clnts.Unlock()
 
 	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
@@ -419,24 +386,3 @@ func (clnt *Clnt) ReqFree(req *Req) {
 	}
 }
 
-func (clnt *Clnt) logFcall(fc *p.Fcall) {
-	if clnt.Debuglevel&DbgLogPackets != 0 {
-		pkt := make([]byte, len(fc.Pkt))
-		copy(pkt, fc.Pkt)
-		clnt.Log.Log(pkt, clnt, DbgLogPackets)
-	}
-
-	if clnt.Debuglevel&DbgLogFcalls != 0 {
-		f := new(p.Fcall)
-		*f = *fc
-		f.Pkt = nil
-		clnt.Log.Log(f, clnt, DbgLogFcalls)
-	}
-}
-
-func (ns *Namespace) cl_init() {
-	ns.clnts = new(ClntList)
-	if sop, ok := (interface{}(ns.clnts)).(StatsOps); ok {
-		sop.statsRegister()
-	}
-}

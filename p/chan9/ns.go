@@ -2,9 +2,24 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"net"
 	"sync"
 )
+
+// Debug flags
+const (
+	DbgPrintFcalls  = (1 << iota) // print all 9P messages on stderr
+	DbgPrintPackets               // print the raw packets on stderr
+	DbgLogFcalls                  // keep the last N 9P messages (can be accessed over http)
+	DbgLogPackets                 // keep the last N 9P messages (can be accessed over http)
+)
+
+type StatsOps interface {
+	statsRegister()
+	statsUnregister()
+}
+
+var DefaultDebuglevel int
+var DefaultLogger *p.Logger
 
 /*
 type NsOps interface {
@@ -16,24 +31,23 @@ type NsOps interface {
 } */
 
 
-// Etype-s
+// Mutually exclusive Etype-s
 const (
-	NS_PASS = iota // pass-through, no subterfuge
-	NS_MOUNT	// start of mount-point for a channel
-	NS_UNION	// union mount - provides a linked list to the mount-pts
+	NS_PASS  = 0	// pass-through, no subterfuge
+	NS_MOUNT = 1	// start of mount-point for a channel
+	NS_UNION = 2	// union mount - provides a linked list to the mount-pts
 )
 
-type NSMount struct {
+/*type NSMount struct {
         Type uint16 // Although "ChanOps" interface deprecates
                         // the Type field, it could be informative.
         Dev uint32 // Device number for this channel
-        Subpath string // "root" to begin requests from the channel.
         *Clnt // embed the channel interface (just the client for now)
 		// contains "Root" = Fid of mounted root
-}
+}*/
 
 type NSUnion struct {
-	Spath []*NSElem // search path of files residing "here"
+	Spath []*NSElem // Search path of files residing "here"
 			// This implies their names are irrelevant,
 			// over-written by name of NSElem that ref-s me.
 }
@@ -44,16 +58,22 @@ type NSUnion struct {
  */
 type NSElem struct {
 	Etype int
-	Name string // name of dir. -- can construct a full path by rooting.
-	MayCreate bool // change to a pointer inside NSUnion?
-	Child map[string]*NSElem // dir tree - used when sub-dirs have mounts
-	*NSMount // used if Etype == NS_MOUNT
+	Cname []string // path taken to create elem
+	MayCreate bool // have to store original create/mount info.
+	*Clnt // used if Etype == NS_MOUNT
 	*NSUnion // used if Etype == NS_UNION
+	Child map[string]*NSElem // dir tree - used if ETYPE != NS_UNION
         Parent []*NSElem // list of parents
 			 // This is important for GC-ing the namespace
 			 // after mounts / binds have taken place.
-                         // Indeterminism in naming the path is avoided in rooting
-                         // by always rooting using the 1st in the list.
+                         // Indeterminism in naming the path is avoided
+                         // by checking the Cname with the issuing call's '..'.
+}
+
+type ClntList struct {
+	sync.Mutex
+	c map[uint32]*Clnt
+	nextdev uint32
 }
 
 // The top-level namespace keeps track
@@ -61,26 +81,29 @@ type NSElem struct {
 type Namespace struct {
 	Tree *NSElem // This one must be of type NS_MOUNT, else there is no
 			// server to accept 9p messages.
-	clnts *ClntList
 	sync.Mutex
 	Debuglevel int    // =0 don't print anything, >0 print Fcalls, >1 print raw packets
 	Root       *Fid   // Fid that points to the root directory
 	Id         string // Used when printing debug messages
 	Log        *p.Logger
 
-	conn     net.Conn
 	tagpool  *pool
 	fidpool  *pool
-	reqout   chan *Req
-	done     chan bool
-	reqfirst *Req
-	reqlast  *Req
 	err      error
 
-	reqchan chan *Req
-	tchan   chan *p.Fcall
+	clnts *ClntList
 }
 
+func (ns *Namespace) init() {
+        ns.clnts = new(ClntList)
+        ns.tagpool = newPool(uint32(p.NOTAG))
+        ns.fidpool = newPool(p.NOFID)
+        if sop, ok := (interface{}(ns.clnts)).(StatsOps); ok {
+                sop.statsRegister()
+	}
+	ns.Debuglevel = DefaultDebuglevel
+	ns.Log = DefaultLogger
+}
 
 // List of path elements.
 type Elemlist struct {
@@ -93,9 +116,11 @@ type Elemlist struct {
 type Fid struct {
 	sync.Mutex
 	Clnt   *Clnt // Client the fid belongs to
+	Cname	[]string
 	Iounit uint32
-	Type uint16   // Channel type (index of function call table)
+	Type uint16   // Channel type (index of function call table) -- FYI
 	Dev uint32    // Server or device number distinguishing the server from others of the same type
+			// duplicates Clnt * info
 	p.Qid         // The Qid description for the file
 	Mode   uint8  // Open mode (one of p.O* values) (if file is open)
 	Fid    uint32 // Fid number
@@ -117,12 +142,6 @@ type pool struct {
 	maxid uint32
 	imap  []byte
 }
-
-type ClntList struct {
-	sync.Mutex
-	clntList, clntLast *Clnt
-}
-
 
 /*
  * Create sub-slices of the names, breaking on '/'.
@@ -183,5 +202,20 @@ func Parsename(name string) (e Elemlist) {
 		e.Elem = append(e.Elem, ".")
 	}
 	return
+}
+
+func (ns *Namespace) logFcall(fc *p.Fcall) {
+	if ns.Debuglevel&DbgLogPackets != 0 {
+		pkt := make([]byte, len(fc.Pkt))
+		copy(pkt, fc.Pkt)
+		ns.Log.Log(pkt, ns, DbgLogPackets)
+	}
+
+	if ns.Debuglevel&DbgLogFcalls != 0 {
+		f := new(p.Fcall)
+		*f = *fc
+		f.Pkt = nil
+		ns.Log.Log(f, ns, DbgLogFcalls)
+	}
 }
 
