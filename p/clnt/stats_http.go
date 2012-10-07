@@ -44,7 +44,7 @@ func (clnt *Clnt) statsRegister() {
 }
 
 func (clnt *Clnt) statsUnregister() {
-	http.Handle("/go9p/clnt/"+clnt.Id, nil)
+	http.HandleFunc("/go9p/clnt/"+clnt.Id, http.NotFound)
 }
 
 func (c *ClntList) statsRegister() {
@@ -52,5 +52,5 @@ func (c *ClntList) statsRegister() {
 }
 
 func (c *ClntList) statsUnregister() {
-	http.HandleFunc("/go9p/clnt", nil)
+	http.HandleFunc("/go9p/clnt/", http.NotFound)
 }
