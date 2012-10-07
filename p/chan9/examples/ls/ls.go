@@ -4,13 +4,14 @@ import (
 	"code.google.com/p/go9p/p"
 	"code.google.com/p/go9p/p/chan9"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 )
 
 var debuglevel = flag.Int("d", 0, "debuglevel")
-var addr = flag.String("s", "127.0.0.1:5640", "server address")
+var addr = flag.String("addr", "127.0.0.1:5640", "server address")
 
 func main() {
 	var err error
@@ -34,7 +35,11 @@ func main() {
 	if err != nil {
 		return
 	}
-	ns.Mount(c, nil, "/", chan9.MREPL, "")
+	err = ns.Mount(c, nil, "/", chan9.MREPL, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", *addr, err)
+		os.Exit(1)
+	}
 
 	for _, arg := range path {
 		file, err = ns.FOpen(arg, p.OREAD)

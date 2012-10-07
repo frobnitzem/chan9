@@ -59,6 +59,7 @@ func (clnt *Clnt) Attach(afid *Fid, user p.User, aname string) (*Fid, error) {
 	}
 
 	fid.Qid = rc.Qid
+	fid.Cname = fid.Cname[:0]
 	fid.walked = true
 	return fid, nil
 }

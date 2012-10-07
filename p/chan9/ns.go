@@ -28,9 +28,9 @@ type NsOps interface {
 
 // Mutually exclusive Etype-s
 const (
-	NS_PASS  = 0	// pass-through, no subterfuge
-	NS_MOUNT = 1	// start of mount-point for a channel
-	NS_UNION = 2	// union mount - provides a linked list to the mount-pts
+	NSPASS  = 0	// pass-through, no subterfuge
+	NSMOUNT = 1	// start of mount-point for a channel
+	NSUNION = 2	// union mount - provides a linked list to the mount-pts
 )
 
 /*type NSMount struct {
@@ -56,8 +56,8 @@ type NSElem struct {
 	Cname []string // path taken to create elem
 	MayCreate bool // have to store original create/mount info.
 	*Clnt // used if Etype == NS_MOUNT
-	*NSUnion // used if Etype == NS_UNION
-	Child map[string]*NSElem // dir tree - used if ETYPE != NS_UNION
+	*NSUnion // used if Etype == NSUNION
+	Child map[string]*NSElem // dir tree - used if ETYPE != NSUNION
         Parent []*NSElem // list of parents
 			 // This is important for GC-ing the namespace
 			 // after mounts / binds have taken place.
@@ -90,6 +90,11 @@ type Namespace struct {
 
 func NewNS() (ns *Namespace) {
 	ns = new(Namespace)
+	ns.Init()
+	return ns
+}
+
+func (ns *Namespace) Init() {
 	ns.User = p.OsUsers.Uid2User(os.Geteuid())
 	ns.Debuglevel = DefaultDebuglevel
         ns.clnts = new(ClntList)
@@ -98,7 +103,6 @@ func NewNS() (ns *Namespace) {
         if sop, ok := (interface{}(ns.clnts)).(StatsOps); ok {
                 sop.statsRegister()
 	}
-	return ns
 }
 
 func (ns *Namespace) Close() {
@@ -167,7 +171,14 @@ type pool struct {
 func Parsename(name string) (e Elemlist) {
         e.Elems = make([]string, 0)
         e.Mustbedir = true // skip leading slash-dots
-	e.Ref, _ = utf8.DecodeRuneInString(name)
+	switch c,_ := utf8.DecodeRuneInString(name); c {
+	case '/':
+		e.Ref = '/'
+	case '#':
+		e.Ref = '#'
+	default:
+		e.Ref = '.'
+	}
         n := 0
 
 	addelem := func (s string) {

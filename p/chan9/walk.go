@@ -41,10 +41,38 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 			qid = fid.Qid
 		}
 		newfid.Qid = qid // it should.
+		update_cname(fid.Cname, wnames, newfid.Cname)
 		newfid.walked = true
 	}
 
 	return rc.Wqid, nil
+}
+
+// This must also work in the case from=out
+func update_cname(from, add, out []string) {
+	var ndotdot int
+	var s string
+	var t []string
+
+	for ndotdot,s = range add {
+		if s != ".." {
+			break
+		}
+	}
+	npop := ndotdot // shouldn't, but just in case.
+	if npop > len(from) {
+		npop = len(from)
+	}
+
+	if l := len(from)-npop+len(add)-ndotdot; cap(out) < l {
+		t = make([]string, l)
+	} else {
+		t = out[:l]
+	}
+	npop = len(from)-npop
+	copy(t[:npop], from)
+	copy(t[npop:], add[ndotdot:])
+	out = t
 }
 
 // Walks to a named file, using the same algo. as Walk, but always starting

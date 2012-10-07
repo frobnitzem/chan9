@@ -5,7 +5,7 @@ package main
 import (
 	"bufio"
 	"code.google.com/p/go9p/p"
-	"code.google.com/p/go9p/p/clnt"
+	"code.google.com/p/go9p/p/chan9"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +14,8 @@ import (
 	"strings"
 )
 
+type Namespace chan9.Namespace
+
 var addr = flag.String("addr", "127.0.0.1:5640", "network address")
 var ouser = flag.String("user", "", "user to connect as")
 var cmdfile = flag.String("file", "", "read commands from file")
@@ -21,15 +23,13 @@ var prompt = flag.String("prompt", "9p> ", "prompt for interactive client")
 var debug = flag.Bool("d", false, "enable debugging (fcalls)")
 var debugall = flag.Bool("D", false, "enable debugging (raw packets)")
 
-var cwd = "/"
-var cfid *clnt.Fid
-
 type Cmd struct {
-	fun  func(c *clnt.Clnt, s []string)
+	fun  func(c *Namespace, s []string)
 	help string
 }
 
 var cmds map[string]*Cmd
+var cwd string = "/"
 
 func init() {
 	cmds = make(map[string]*Cmd)
@@ -49,7 +49,6 @@ func init() {
 	cmds["exit"] = &Cmd{cmdquit, "exit\t«quit»"}
 }
 
-// normalize user-supplied path. path starting with '/' is left untouched, otherwise is considered
 // local from cwd
 func normpath(s string) string {
 	if len(s) > 0 {
@@ -78,7 +77,7 @@ func modetostr(mode uint32) string {
 }
 
 // Write the string s to remote file f. Create f if it doesn't exist
-func writeone(c *clnt.Clnt, f, s string) {
+func writeone(c *Namespace, f, s string) {
 	fname := normpath(f)
 	file, oserr := c.FCreate(fname, 0666, p.OWRITE)
 	if oserr != nil {
@@ -103,21 +102,21 @@ func writeone(c *clnt.Clnt, f, s string) {
 }
 
 // Write s[1:] (with appended spaces) to the file s[0]
-func cmdwrite(c *clnt.Clnt, s []string) {
+func cmdwrite(c *Namespace, s []string) {
 	fname := normpath(s[0])
 	str := strings.Join(s[1:], " ")
 	writeone(c, fname, str)
 }
 
 // Echo (append newline) s[1:] to s[0]
-func cmdecho(c *clnt.Clnt, s []string) {
+func cmdecho(c *Namespace, s []string) {
 	fname := normpath(s[0])
 	str := strings.Join(s[1:], " ") + "\n"
 	writeone(c, fname, str)
 }
 
 // Stat the remote file f
-func statone(c *clnt.Clnt, f string) {
+func statone(c *Namespace, f string) {
 	fname := normpath(f)
 
 	stat, oserr := c.FStat(fname)
@@ -128,7 +127,7 @@ func statone(c *clnt.Clnt, f string) {
 	fmt.Fprintf(os.Stdout, "%s\n", stat)
 }
 
-func cmdstat(c *clnt.Clnt, s []string) {
+func cmdstat(c *Namespace, s []string) {
 	for _, f := range s {
 		statone(c, normpath(f))
 	}
@@ -138,7 +137,7 @@ func dirtostr(d *p.Dir) string {
 	return fmt.Sprintf("%s %s %s %-8d\t\t%s", modetostr(d.Mode), d.Uid, d.Gid, d.Length, d.Name)
 }
 
-func lsone(c *clnt.Clnt, path string, long bool) {
+func lsone(c *Namespace, path string, long bool) {
 	s := normpath(path)
 	st, oserr := c.FStat(s)
 	if oserr != nil {
@@ -173,7 +172,7 @@ func lsone(c *clnt.Clnt, path string, long bool) {
 	}
 }
 
-func cmdls(c *clnt.Clnt, s []string) {
+func cmdls(c *Namespace, s []string) {
 	long := false
 	if len(s) > 0 && s[0] == "-l" {
 		long = true
@@ -188,7 +187,7 @@ func cmdls(c *clnt.Clnt, s []string) {
 	}
 }
 
-func walkone(c *clnt.Clnt, s string, fileok bool) {
+func walkone(c *Namespace, s string, fileok bool) {
 	ncwd := normpath(s)
 
 	fid, err := c.FWalk(ncwd)
@@ -197,7 +196,7 @@ func walkone(c *clnt.Clnt, s string, fileok bool) {
 		fmt.Fprintf(os.Stderr, "walk error: %s\n", err)
 		return
 	}
-	defer c.Clunk(fid)
+	defer fid.Clunk()
 
 	if fileok != true && (fid.Type&p.QTDIR == 0) {
 		fmt.Fprintf(os.Stderr, "can't cd to file [%s]\n", ncwd)
@@ -207,14 +206,14 @@ func walkone(c *clnt.Clnt, s string, fileok bool) {
 	cwd = ncwd
 }
 
-func cmdcd(c *clnt.Clnt, s []string) {
+func cmdcd(c *Namespace, s []string) {
 	if s != nil {
 		walkone(c, strings.Join(s, "/"), false)
 	}
 }
 
 // Print the contents of f
-func cmdcat(c *clnt.Clnt, s []string) {
+func cmdcat(c *Namespace, s []string) {
 	buf := make([]byte, 8192)
 Outer:
 	for _, f := range s {
@@ -239,7 +238,7 @@ Outer:
 }
 
 // Create a single directory on remote server
-func mkone(c *clnt.Clnt, s string) {
+func mkone(c *Namespace, s string) {
 	fname := normpath(s)
 	file, oserr := c.FCreate(fname, 0777|p.DMDIR, p.OREAD)
 	if oserr != nil {
@@ -250,14 +249,14 @@ func mkone(c *clnt.Clnt, s string) {
 }
 
 // Create directories on remote server
-func cmdmkdir(c *clnt.Clnt, s []string) {
+func cmdmkdir(c *Namespace, s []string) {
 	for _, f := range s {
 		mkone(c, f)
 	}
 }
 
 // Copy a remote file to local filesystem
-func cmdget(c *clnt.Clnt, s []string) {
+func cmdget(c *Namespace, s []string) {
 	var from, to string
 	switch len(s) {
 	case 1:
@@ -308,7 +307,7 @@ func cmdget(c *clnt.Clnt, s []string) {
 }
 
 // Copy a local file to remote server
-func cmdput(c *clnt.Clnt, s []string) {
+func cmdput(c *Namespace, s []string) {
 	var from, to string
 	switch len(s) {
 	case 1:
@@ -363,10 +362,10 @@ func cmdput(c *clnt.Clnt, s []string) {
 	}
 }
 
-func cmdpwd(c *clnt.Clnt, s []string) { fmt.Fprintf(os.Stdout, cwd+"\n") }
+func cmdpwd(c *Namespace, s []string) { fmt.Fprintf(os.Stdout, cwd+"\n") }
 
 // Remove f from remote server
-func rmone(c *clnt.Clnt, f string) {
+func rmone(c *Namespace, f string) {
 	fname := normpath(f)
 
 	err := c.FRemove(fname)
@@ -376,14 +375,14 @@ func rmone(c *clnt.Clnt, f string) {
 	}
 }
 // Remove one or more files from the server
-func cmdrm(c *clnt.Clnt, s []string) {
+func cmdrm(c *Namespace, s []string) {
 	for _, f := range s {
 		rmone(c, normpath(f))
 	}
 }
 
 // Print available commands
-func cmdhelp(c *clnt.Clnt, s []string) {
+func cmdhelp(c *Namespace, s []string) {
 	cmdstr := ""
 	if len(s) > 0 {
 		for _, h := range s {
@@ -404,9 +403,9 @@ func cmdhelp(c *clnt.Clnt, s []string) {
 	fmt.Fprintf(os.Stdout, "%s", cmdstr)
 }
 
-func cmdquit(c *clnt.Clnt, s []string) { os.Exit(0) }
+func cmdquit(c *Namespace, s []string) { os.Exit(0) }
 
-func cmd(c *clnt.Clnt, cmd string) {
+func cmd(c *Namespace, cmd string) {
 	ncmd := strings.Fields(cmd)
 	if len(ncmd) <= 0 {
 		return
@@ -420,7 +419,7 @@ func cmd(c *clnt.Clnt, cmd string) {
 	return
 }
 
-func interactive(c *clnt.Clnt) {
+func interactive(c *Namespace) {
 	reader := bufio.NewReaderSize(os.Stdin, 8192)
 	for {
 		fmt.Print(*prompt)
@@ -443,35 +442,34 @@ func interactive(c *clnt.Clnt) {
 func main() {
 	var user p.User
 	var err error
-	var ns *chan9.Namespace
+	var c *chan9.Clnt
 	var file *chan9.File
+	var ns *Namespace = chan9.NewNS()
 
 	flag.Parse()
 
-	if *ouser == "" {
-		user = p.OsUsers.Uid2User(os.Geteuid())
-	} else {
-		user = p.OsUsers.Uname2User(*ouser)
+	naddr := *addr
+	if *ouser != "" {
+		ns.User = p.OsUsers.Uname2User(*ouser)
+	}
+	if *debug {
+		ns.Debuglevel = 1
+	}
+	if *debugall {
+		ns.Debuglevel = 2
 	}
 
-	naddr := *addr
-	if strings.LastIndex(naddr, ":") == -1 {
-		naddr = naddr + ":5640"
+	c, err = ns.Dial(*addr)
+	if err != nil {
+		return
 	}
-	ns, err = chan9.NameNS("tcp!"+naddr, "", user)
+	err = ns.Mount(c, nil, "/", chan9.MREPL, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", naddr, err)
 		os.Exit(1)
 	}
 
-	if *debug {
-		c.Debuglevel = 1
-	}
-	if *debugall {
-		c.Debuglevel = 2
-	}
-
-	walkone(c, "/", false)
+	walkone(ns, "/", false)
 
 	if file != nil {
 		//process(c)
@@ -479,10 +477,10 @@ func main() {
 	} else if flag.NArg() > 0 {
 		flags := flag.Args()
 		for _, uc := range flags {
-			cmd(c, uc)
+			cmd(ns, uc)
 		}
 	} else {
-		interactive(c)
+		interactive(ns)
 	}
 
 	return

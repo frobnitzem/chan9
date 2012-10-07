@@ -307,6 +307,7 @@ func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt.Msize = msize
 	clnt.Dotu = dotu
 	clnt.User = ns.User
+	clnt.Subpath = make([]string, 0) // root
 	clnt.tagpool = newPool(uint32(p.NOTAG))
 	clnt.fidpool = ns.fidpool
 	clnt.reqout = make(chan *Req)
