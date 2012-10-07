@@ -1,25 +1,20 @@
+/*
+ * Copyright 2009 The Go Authors.  All rights reserved.
+ * Use of this source code is governed by a BSD-style
+ * license that can be found in the LICENSE file.
+ *
+ * Copyright 2012 David M. Rogers
+ *
+ */
+
 package chan9
 
 import (
 	"code.google.com/p/go9p/p"
+	"unicode/utf8"
+	"os"
 	"sync"
 )
-
-// Debug flags
-const (
-	DbgPrintFcalls  = (1 << iota) // print all 9P messages on stderr
-	DbgPrintPackets               // print the raw packets on stderr
-	DbgLogFcalls                  // keep the last N 9P messages (can be accessed over http)
-	DbgLogPackets                 // keep the last N 9P messages (can be accessed over http)
-)
-
-type StatsOps interface {
-	statsRegister()
-	statsUnregister()
-}
-
-var DefaultDebuglevel int
-var DefaultLogger *p.Logger
 
 /*
 type NsOps interface {
@@ -79,35 +74,43 @@ type ClntList struct {
 // The top-level namespace keeps track
 // of the mounted p9 clients and the user's fid-s.
 type Namespace struct {
-	Tree *NSElem // This one must be of type NS_MOUNT, else there is no
-			// server to accept 9p messages.
 	sync.Mutex
-	Debuglevel int    // =0 don't print anything, >0 print Fcalls, >1 print raw packets
-	Root       *Fid   // Fid that points to the root directory
-	Id         string // Used when printing debug messages
-	Log        *p.Logger
+	Tree       *NSElem // This one must be of type NS_MOUNT, else there is no
+			   //    server to accept 9p messages.
+	Debuglevel int     // =0 don't print anything, >0 print Fcalls, >1 print raw packets
+			   //    can be over-written here of per-client
+	Root       *Fid    // Fid that points to the root directory
+	User       p.User  // default user for calls -- can be over-written here or per-client
 
-	tagpool  *pool
-	fidpool  *pool
-	err      error
+	fidpool    *pool
+	err        error
 
-	clnts *ClntList
+	clnts      *ClntList
 }
 
-func (ns *Namespace) init() {
+func NewNS() (ns *Namespace) {
+	ns = new(Namespace)
+	ns.User = p.OsUsers.Uid2User(os.Geteuid())
+	ns.Debuglevel = DefaultDebuglevel
         ns.clnts = new(ClntList)
-        ns.tagpool = newPool(uint32(p.NOTAG))
+	ns.clnts.c = make(map[uint32]*Clnt)
         ns.fidpool = newPool(p.NOFID)
         if sop, ok := (interface{}(ns.clnts)).(StatsOps); ok {
                 sop.statsRegister()
 	}
-	ns.Debuglevel = DefaultDebuglevel
-	ns.Log = DefaultLogger
+	return ns
+}
+
+func (ns *Namespace) Close() {
+	for _,c := range ns.clnts.c {
+		ns.rm(c, nil)
+	}
 }
 
 // List of path elements.
 type Elemlist struct {
-        Elem []string
+        Elems []string
+        Ref rune
         Mustbedir bool
 }
 
@@ -131,8 +134,8 @@ type Fid struct {
 // The file is similar to the Fid, but is used in the high-level client
 // interface.
 type File struct {
-	fid    *Fid
-	offset uint64
+	Fid    *Fid
+	Offset uint64
 }
 
 type pool struct {
@@ -159,26 +162,26 @@ type pool struct {
    3. Eliminate .. path name elements (the parent directory) and the non-. non-.., element that precedes them.
    4. Eliminate .. elements that begin a rooted path, that is, replace /.. by / at the beginning of a path.
    5. Leave intact .. elements that begin a non-rooted path.
-   If the result of this process is a null string, cleanname returns the string ".", representing the current directory. 
+   If the result of this process is a null string, cleanname returns an empty list.
  */
 func Parsename(name string) (e Elemlist) {
-        e.Elem = make([]string, 0)
+        e.Elems = make([]string, 0)
         e.Mustbedir = true // skip leading slash-dots
-	rooted := name[0] == '/'
+	e.Ref, _ = utf8.DecodeRuneInString(name)
         n := 0
 
 	addelem := func (s string) {
 		if s == ".." {
-			if l := len(e.Elem); l > 0 {
-				if e.Elem[l-1] != ".." {
-					e.Elem = e.Elem[:l-1]
+			if l := len(e.Elems); l > 0 {
+				if e.Elems[l-1] != ".." {
+					e.Elems = e.Elems[:l-1]
 					return
 				}
-			} else if rooted {
+			} else if e.Ref == '/' {
 				return // skip if rooted
 			}
 		}
-		e.Elem = append(e.Elem, s)
+		e.Elems = append(e.Elems, s)
 	}
         for i, c := range name {
                 if e.Mustbedir {
@@ -198,24 +201,9 @@ func Parsename(name string) (e Elemlist) {
 			e.Mustbedir = true }
 		addelem(name[n:i])
         }
-	if l := len(e.Elem); l == 0 {
-		e.Elem = append(e.Elem, ".")
-	}
+	/*if l := len(e.Elems); l == 0 {
+		e.Elems = append(e.Elems, ".")
+	}*/
 	return
-}
-
-func (ns *Namespace) logFcall(fc *p.Fcall) {
-	if ns.Debuglevel&DbgLogPackets != 0 {
-		pkt := make([]byte, len(fc.Pkt))
-		copy(pkt, fc.Pkt)
-		ns.Log.Log(pkt, ns, DbgLogPackets)
-	}
-
-	if ns.Debuglevel&DbgLogFcalls != 0 {
-		f := new(p.Fcall)
-		*f = *fc
-		f.Pkt = nil
-		ns.Log.Log(f, ns, DbgLogFcalls)
-	}
 }
 

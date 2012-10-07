@@ -27,7 +27,6 @@ func (clnt *Clnt) Auth(user p.User, aname string) (*Fid, error) {
 		return nil, err
 	}
 
-	fid.User = user
 	fid.walked = true
 	return fid, nil
 }
@@ -60,13 +59,12 @@ func (clnt *Clnt) Attach(afid *Fid, user p.User, aname string) (*Fid, error) {
 	}
 
 	fid.Qid = rc.Qid
-	fid.User = user
 	fid.walked = true
 	return fid, nil
 }
 
-// Connects to a file server and attaches to it as the specified user.
-func (ns *Namespace) Dial(addr, aname string, user p.User) (*Clnt, error) {
+// Dial a server and return a non-attached client "channel."
+func (ns *Namespace) Dial(addr string) (*Clnt, error) {
 	proto, netaddr, e := parse_net_name(addr)
 	if e != nil {
 		return nil, &p.Error{e.Error(), p.EIO}
@@ -81,13 +79,6 @@ func (ns *Namespace) Dial(addr, aname string, user p.User) (*Clnt, error) {
 		return nil, err
 	}
 
-	fid, err := clnt.Attach(nil, user, aname)
-	if err != nil {
-		clnt.Close()
-		return nil, err
-	}
-
-	clnt.Root = fid
 	return clnt, nil
 }
 
@@ -145,10 +136,3 @@ func parse_net_name(addr string) (string, string, error) {
 	return proto, netaddr, nil
 }
 
-// Closes the connection to the file sever.
-func (clnt *Clnt) Close() {
-	clnt.Lock()
-	clnt.err = &p.Error{"connection closed", p.ECONNRESET}
-	clnt.conn.Close()
-	clnt.Unlock()
-}

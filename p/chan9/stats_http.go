@@ -1,7 +1,7 @@
 package chan9
 
 import (
-	//"code.google.com/p/go9p/p"
+	"code.google.com/p/go9p/p"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +12,7 @@ func (clnt *Clnt) ServeHTTP(c http.ResponseWriter, r *http.Request) {
 	defer io.WriteString(c, "</body></html>")
 
 	// fcalls
-	/*if clnt.Debuglevel&DbgLogFcalls != 0 {
+	if clnt.Debuglevel&DbgLogFcalls != 0 {
 		fs := clnt.Log.Filter(clnt, DbgLogFcalls)
 		io.WriteString(c, fmt.Sprintf("<h2>Last %d 9P messages</h2>", len(fs)))
 		for _, l := range fs {
@@ -21,7 +21,7 @@ func (clnt *Clnt) ServeHTTP(c http.ResponseWriter, r *http.Request) {
 				io.WriteString(c, fmt.Sprintf("<br>%s", fc))
 			}
 		}
-	}*/
+	}
 }
 
 func (clnts *ClntList) ServeHTTP(c http.ResponseWriter, r *http.Request) {
@@ -44,7 +44,7 @@ func (clnt *Clnt) statsRegister() {
 }
 
 func (clnt *Clnt) statsUnregister() {
-	http.Handle("/go9p/clnt/"+clnt.Id, nil)
+	http.HandleFunc("/go9p/clnt/"+clnt.Id, http.NotFound)
 }
 
 func (c *ClntList) statsRegister() {
@@ -52,5 +52,5 @@ func (c *ClntList) statsRegister() {
 }
 
 func (c *ClntList) statsUnregister() {
-	http.Handle("/go9p/clnt", nil)
+	http.HandleFunc("/go9p/clnt", http.NotFound)
 }

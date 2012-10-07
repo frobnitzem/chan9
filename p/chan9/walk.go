@@ -6,92 +6,71 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"strings"
 	"syscall"
 )
 
-// Starting from the file associated with fid, walks all wnames in
-// sequence and associates the resulting file with newfid. If no wnames
+// Starting from the file associated with fid, walks all e.Elems names in
+// sequence and associates the resulting file with newfid. If no elems
 // were walked successfully, an Error is returned. Otherwise a slice with a
 // Qid for each walked name is returned.
-func (clnt *Clnt) Walk(fid *Fid, newfid *Fid, wnames []string) ([]p.Qid, error) {
-	tc := clnt.NewFcall()
+// The newfid is only valid if all names are walked, and all
+// wnames must be user-searchable directories.
+// wnames must also be less than MAXWELEM=16 for most servers,
+// but this call is staying close to the network call and doesn't deal with that.
+func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
+	tc := fid.Clnt.NewFcall()
+
 	err := p.PackTwalk(tc, fid.Fid, newfid.Fid, wnames)
 	if err != nil {
 		return nil, err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return nil, err
 	}
+	if rc.Type == p.Rerror {
+		return nil, &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
+	}
 
-	newfid.walked = true
+	if len(rc.Wqid) == len(wnames) { // success.
+		var qid p.Qid
+		if l := len(rc.Wqid); l > 0 {
+			qid = rc.Wqid[l-1]
+		} else {
+			qid = fid.Qid
+		}
+		newfid.Qid = qid // it should.
+		newfid.walked = true
+	}
+
 	return rc.Wqid, nil
 }
 
-// Walks to a named file. Returns a Fid associated with the file,
-// or an Error.
+// Walks to a named file, using the same algo. as Walk, but always starting
+// from Clnt.Root. Returns a Fid associated with the file, or an Error.
 func (clnt *Clnt) FWalk(path string) (*Fid, error) {
 	var err error = nil
+	var wqid []p.Qid
 
-	var i, m int
-	for i = 0; i < len(path); i++ {
-		if path[i] != '/' {
-			break
-		}
-	}
-
-	if i > 0 {
-		path = path[i:len(path)]
-	}
-
-	wnames := strings.Split(path, "/")
+	e := Parsename(path)
+	wnames := e.Elems
 	newfid := clnt.FidAlloc()
 	fid := clnt.Root
-	newfid.User = fid.User
 
-	/* get rid of the empty names */
-	for i, m = 0, 0; i < len(wnames); i++ {
-		if wnames[i] != "" {
-			wnames[m] = wnames[i]
-			m++
-		}
-	}
-
-	wnames = wnames[0:m]
-	for {
+	for { // step in blocks of 16 path elems
 		n := len(wnames)
 		if n > 16 {
 			n = 16
 		}
 
-		tc := clnt.NewFcall()
-		err = p.PackTwalk(tc, fid.Fid, newfid.Fid, wnames[0:n])
+		wqid, err = fid.Walk(newfid, wnames[0:n])
 		if err != nil {
 			goto error
 		}
-
-		var rc *p.Fcall
-		rc, err = clnt.Rpc(tc)
-		if err != nil {
-			goto error
-		}
-		if rc.Type == p.Rerror {
-			err = &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
-			goto error
-		}
-
-		newfid.walked = true
-		if len(rc.Wqid) != n {
+		if len(wqid) != n {
 			err = &p.Error{"file not found", p.ENOENT}
 			goto error
-		}
-
-		if len(rc.Wqid) > 0 {
-			newfid.Qid = rc.Wqid[len(rc.Wqid)-1]
-		} else {
-			newfid.Qid = fid.Qid
 		}
 
 		wnames = wnames[n:len(wnames)]
@@ -104,6 +83,18 @@ func (clnt *Clnt) FWalk(path string) (*Fid, error) {
 	return newfid, nil
 
 error:
-	clnt.Clunk(newfid)
+	newfid.Clunk()
 	return nil, err
+}
+
+// Starting from the file associated with fid, walks all wnames in
+// sequence and associates the resulting file with newfid. If no wnames
+// were walked successfully, an Error is returned. Otherwise a slice with a
+// Qid for each walked name is returned.
+func (ns *Namespace) Walk(fid *Fid, newfid *Fid, wnames []string) ([]p.Qid, error) {
+	return fid.Walk(newfid, wnames)
+}
+
+func (ns *Namespace) FWalk(path string) (*Fid, error) {
+	return ns.Root.Clnt.FWalk(path)
 }

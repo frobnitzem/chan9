@@ -2,7 +2,7 @@ package main
 
 import (
 	"code.google.com/p/go9p/p"
-	"code.google.com/p/go9p/p/clnt"
+	"code.google.com/p/go9p/p/chan9"
 	"flag"
 	"io"
 	"log"
@@ -10,51 +10,63 @@ import (
 )
 
 var debuglevel = flag.Int("d", 0, "debuglevel")
-var addr = flag.String("addr", "127.0.0.1:5640", "network address")
+var addr = flag.String("s", "127.0.0.1:5640", "server address")
 
 func main() {
-	var user p.User
 	var err error
-	var c *clnt.Clnt
-	var file *clnt.File
+	var c *chan9.Clnt
+	var file *chan9.File
 	var d []*p.Dir
+	var path []string
+	var ns *chan9.Namespace = chan9.NewNS()
 
 	flag.Parse()
-	user = p.OsUsers.Uid2User(os.Geteuid())
-	clnt.DefaultDebuglevel = *debuglevel
-	c, err = clnt.Mount("tcp", *addr, "", user)
-	if err != nil {
-		goto error
+	chan9.DefaultDebuglevel = *debuglevel
+
+	if flag.NArg() == 0 {
+		path = make([]string, 1)
+		path[0] = "/"
+	} else {
+		path = flag.Args()
 	}
 
-	if flag.NArg() != 1 {
-		log.Println("invalid arguments")
+	c, err = ns.Dial(*addr)
+	if err != nil {
 		return
 	}
+	ns.Mount(c, nil, "/", chan9.MREPL, "")
 
-	file, err = c.FOpen(flag.Arg(0), p.OREAD)
-	if err != nil {
-		goto error
-	}
+	for _, arg := range path {
+		file, err = ns.FOpen(arg, p.OREAD)
+		if file.Fid.Qid.Type & p.QTDIR > 0 {
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			for {
+				d, err = file.Readdir(0)
+				if d == nil || len(d) == 0 || err != nil {
+					break
+				}
 
-	for {
-		d, err = file.Readdir(0)
-		if d == nil || len(d) == 0 || err != nil {
-			break
+				for _, di := range(d) {
+					os.Stdout.WriteString(di.Name + "\n")
+				}
+			}
+		} else {
+			os.Stdout.WriteString(arg + "\n")
+			//os.Stdout.WriteString(file.Fid.Cname + "\n")
 		}
+		file.Close()
 
-		for i := 0; i < len(d); i++ {
-			os.Stdout.WriteString(d[i].Name + "\n")
+		if err != nil && err != io.EOF {
+			log.Println(err)
+			err = nil
+			continue
 		}
 	}
-
-	file.Close()
-	if err != nil && err != io.EOF {
-		goto error
-	}
+	ns.Close()
 
 	return
 
-error:
-	log.Println(err)
 }

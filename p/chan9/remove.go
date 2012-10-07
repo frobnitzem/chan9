@@ -9,15 +9,15 @@ import "syscall"
 
 // Removes the file associated with the Fid. Returns nil if the
 // operation is successful.
-func (clnt *Clnt) Remove(fid *Fid) error {
-	tc := clnt.NewFcall()
+func (fid *Fid) Remove() error {
+	tc := fid.Clnt.NewFcall()
 	err := p.PackTremove(tc, fid.Fid)
 	if err != nil {
 		return err
 	}
 
-	rc, err := clnt.Rpc(tc)
-	clnt.fidpool.putId(fid.Fid)
+	rc, err := fid.Clnt.Rpc(tc)
+	fid.Clnt.fidpool.putId(fid.Fid)
 	fid.Fid = p.NOFID
 
 	if rc.Type == p.Rerror {
@@ -28,13 +28,13 @@ func (clnt *Clnt) Remove(fid *Fid) error {
 }
 
 // Removes the named file. Returns nil if the operation is successful.
-func (clnt *Clnt) FRemove(path string) error {
+func (ns *Namespace) FRemove(path string) error {
 	var err error
-	fid, err := clnt.FWalk(path)
+	fid, err := ns.FWalk(path)
 	if err != nil {
 		return err
 	}
 
-	err = clnt.Remove(fid)
+	err = fid.Remove()
 	return err
 }

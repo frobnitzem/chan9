@@ -11,18 +11,18 @@ import "syscall"
 // Reads count bytes starting from offset from the file associated with the fid.
 // Returns a slice with the data read, if the operation was successful, or an
 // Error.
-func (clnt *Clnt) Read(fid *Fid, offset uint64, count uint32) ([]byte, error) {
+func (fid *Fid) Read(offset uint64, count uint32) ([]byte, error) {
 	if count > fid.Iounit {
 		count = fid.Iounit
 	}
 
-	tc := clnt.NewFcall()
+	tc := fid.Clnt.NewFcall()
 	err := p.PackTread(tc, fid.Fid, offset, count)
 	if err != nil {
 		return nil, err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return nil, err
 	}
@@ -36,9 +36,9 @@ func (clnt *Clnt) Read(fid *Fid, offset uint64, count uint32) ([]byte, error) {
 // Reads up to len(buf) bytes from the File. Returns the number
 // of bytes read, or an Error.
 func (file *File) Read(buf []byte) (int, error) {
-	n, err := file.ReadAt(buf, int64(file.offset))
+	n, err := file.ReadAt(buf, int64(file.Offset))
 	if err == nil {
-		file.offset += uint64(n)
+		file.Offset += uint64(n)
 	}
 
 	return n, err
@@ -47,7 +47,7 @@ func (file *File) Read(buf []byte) (int, error) {
 // Reads up to len(buf) bytes from the file starting from offset.
 // Returns the number of bytes read, or an Error.
 func (file *File) ReadAt(buf []byte, offset int64) (int, error) {
-	b, err := file.fid.Clnt.Read(file.fid, uint64(offset), uint32(len(buf)))
+	b, err := file.Fid.Read(uint64(offset), uint32(len(buf)))
 	if err != nil {
 		return 0, err
 	}
@@ -88,7 +88,7 @@ func (file *File) Readn(buf []byte, offset uint64) (int, error) {
 // all entries from the directory). If the operation fails, returns
 // an Error.
 func (file *File) Readdir(num int) ([]*p.Dir, error) {
-	buf := make([]byte, file.fid.Clnt.Msize-p.IOHDRSZ)
+	buf := make([]byte, file.Fid.Clnt.Msize-p.IOHDRSZ)
 	dirs := make([]*p.Dir, 32)
 	pos := 0
 	for {
@@ -102,7 +102,7 @@ func (file *File) Readdir(num int) ([]*p.Dir, error) {
 		}
 
 		for b := buf[0:n]; len(b) > 0; {
-			d, perr := p.UnpackDir(b, file.fid.Clnt.Dotu)
+			d, perr := p.UnpackDir(b, file.Fid.Clnt.Dotu)
 			if perr != nil {
 				return nil, perr
 			}

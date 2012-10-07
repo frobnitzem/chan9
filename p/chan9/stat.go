@@ -8,14 +8,14 @@ import "code.google.com/p/go9p/p"
 import "syscall"
 
 // Returns the metadata for the file associated with the Fid, or an Error.
-func (clnt *Clnt) Stat(fid *Fid) (*p.Dir, error) {
-	tc := clnt.NewFcall()
+func (fid *Fid) Stat() (*p.Dir, error) {
+	tc := fid.Clnt.NewFcall()
 	err := p.PackTstat(tc, fid.Fid)
 	if err != nil {
 		return nil, err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return nil, err
 	}
@@ -27,26 +27,26 @@ func (clnt *Clnt) Stat(fid *Fid) (*p.Dir, error) {
 }
 
 // Returns the metadata for a named file, or an Error.
-func (clnt *Clnt) FStat(path string) (*p.Dir, error) {
-	fid, err := clnt.FWalk(path)
+func (ns *Namespace) FStat(path string) (*p.Dir, error) {
+	fid, err := ns.FWalk(path)
 	if err != nil {
 		return nil, err
 	}
 
-	d, err := clnt.Stat(fid)
-	clnt.Clunk(fid)
+	d, err := fid.Stat()
+	fid.Clunk()
 	return d, err
 }
 
 // Modifies the data of the file associated with the Fid, or an Error.
-func (clnt *Clnt) Wstat(fid *Fid, dir *p.Dir) error {
-	tc := clnt.NewFcall()
-	err := p.PackTwstat(tc, fid.Fid, dir, clnt.Dotu)
+func (fid *Fid) Wstat(dir *p.Dir) error {
+	tc := fid.Clnt.NewFcall()
+	err := p.PackTwstat(tc, fid.Fid, dir, fid.Clnt.Dotu)
 	if err != nil {
 		return err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return err
 	}

@@ -9,18 +9,18 @@ import "syscall"
 
 // Write up to len(data) bytes starting from offset. Returns the
 // number of bytes written, or an Error.
-func (clnt *Clnt) Write(fid *Fid, data []byte, offset uint64) (int, error) {
+func (fid *Fid) Write(data []byte, offset uint64) (int, error) {
 	if uint32(len(data)) > fid.Iounit {
 		data = data[0:fid.Iounit]
 	}
 
-	tc := clnt.NewFcall()
+	tc := fid.Clnt.NewFcall()
 	err := p.PackTwrite(tc, fid.Fid, offset, uint32(len(data)), data)
 	if err != nil {
 		return 0, err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return 0, err
 	}
@@ -34,9 +34,9 @@ func (clnt *Clnt) Write(fid *Fid, data []byte, offset uint64) (int, error) {
 // Writes up to len(buf) bytes to a file. Returns the number of
 // bytes written, or an Error.
 func (file *File) Write(buf []byte) (int, error) {
-	n, err := file.WriteAt(buf, int64(file.offset))
+	n, err := file.WriteAt(buf, int64(file.Offset))
 	if err == nil {
-		file.offset += uint64(n)
+		file.Offset += uint64(n)
 	}
 
 	return n, err
@@ -45,7 +45,7 @@ func (file *File) Write(buf []byte) (int, error) {
 // Writes up to len(buf) bytes starting from offset. Returns the number
 // of bytes written, or an Error.
 func (file *File) WriteAt(buf []byte, offset int64) (int, error) {
-	return file.fid.Clnt.Write(file.fid, buf, uint64(offset))
+	return file.Fid.Write(buf, uint64(offset))
 }
 
 // Writes exactly len(buf) bytes starting from offset. Returns the number of

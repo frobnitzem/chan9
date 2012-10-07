@@ -12,14 +12,14 @@ import (
 
 // Opens the file associated with the fid. Returns nil if
 // the operation is successful.
-func (clnt *Clnt) Open(fid *Fid, mode uint8) error {
-	tc := clnt.NewFcall()
+func (fid *Fid) Open(mode uint8) error {
+	tc := fid.Clnt.NewFcall()
 	err := p.PackTopen(tc, fid.Fid, mode)
 	if err != nil {
 		return err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return err
 	}
@@ -29,8 +29,8 @@ func (clnt *Clnt) Open(fid *Fid, mode uint8) error {
 
 	fid.Qid = rc.Qid
 	fid.Iounit = rc.Iounit
-	if fid.Iounit == 0 || fid.Iounit > clnt.Msize-p.IOHDRSZ {
-		fid.Iounit = clnt.Msize - p.IOHDRSZ
+	if fid.Iounit == 0 || fid.Iounit > fid.Clnt.Msize-p.IOHDRSZ {
+		fid.Iounit = fid.Clnt.Msize - p.IOHDRSZ
 	}
 	fid.Mode = mode
 	return nil
@@ -38,14 +38,14 @@ func (clnt *Clnt) Open(fid *Fid, mode uint8) error {
 
 // Creates a file in the directory associated with the fid. Returns nil
 // if the operation is successful.
-func (clnt *Clnt) Create(fid *Fid, name string, perm uint32, mode uint8, ext string) error {
-	tc := clnt.NewFcall()
-	err := p.PackTcreate(tc, fid.Fid, name, perm, mode, ext, clnt.Dotu)
+func (fid *Fid) Create(name string, perm uint32, mode uint8, ext string) error {
+	tc := fid.Clnt.NewFcall()
+	err := p.PackTcreate(tc, fid.Fid, name, perm, mode, ext, fid.Clnt.Dotu)
 	if err != nil {
 		return err
 	}
 
-	rc, err := clnt.Rpc(tc)
+	rc, err := fid.Clnt.Rpc(tc)
 	if err != nil {
 		return err
 	}
@@ -55,8 +55,8 @@ func (clnt *Clnt) Create(fid *Fid, name string, perm uint32, mode uint8, ext str
 
 	fid.Qid = rc.Qid
 	fid.Iounit = rc.Iounit
-	if fid.Iounit == 0 || fid.Iounit > clnt.Msize-p.IOHDRSZ {
-		fid.Iounit = clnt.Msize - p.IOHDRSZ
+	if fid.Iounit == 0 || fid.Iounit > fid.Clnt.Msize-p.IOHDRSZ {
+		fid.Iounit = fid.Clnt.Msize - p.IOHDRSZ
 	}
 	fid.Mode = mode
 	return nil
@@ -64,13 +64,13 @@ func (clnt *Clnt) Create(fid *Fid, name string, perm uint32, mode uint8, ext str
 
 // Creates and opens a named file.
 // Returns the file if the operation is successful, or an Error.
-func (clnt *Clnt) FCreate(path string, perm uint32, mode uint8) (*File, error) {
+func (ns *Namespace) FCreate(path string, perm uint32, mode uint8) (*File, error) {
 	n := strings.LastIndex(path, "/")
 	if n < 0 {
 		n = 0
 	}
 
-	fid, err := clnt.FWalk(path[0:n])
+	fid, err := ns.FWalk(path[0:n])
 	if err != nil {
 		return nil, err
 	}
@@ -79,9 +79,9 @@ func (clnt *Clnt) FCreate(path string, perm uint32, mode uint8) (*File, error) {
 		n++
 	}
 
-	err = clnt.Create(fid, path[n:], perm, mode, "")
+	err = fid.Create(path[n:], perm, mode, "")
 	if err != nil {
-		clnt.Clunk(fid)
+		fid.Clunk()
 		return nil, err
 	}
 
@@ -89,15 +89,15 @@ func (clnt *Clnt) FCreate(path string, perm uint32, mode uint8) (*File, error) {
 }
 
 // Opens a named file. Returns the opened file, or an Error.
-func (clnt *Clnt) FOpen(path string, mode uint8) (*File, error) {
-	fid, err := clnt.FWalk(path)
+func (ns *Namespace) FOpen(path string, mode uint8) (*File, error) {
+	fid, err := ns.FWalk(path)
 	if err != nil {
 		return nil, err
 	}
 
-	err = clnt.Open(fid, mode)
+	err = fid.Open(mode)
 	if err != nil {
-		clnt.Clunk(fid)
+		fid.Clunk()
 		return nil, err
 	}
 
