@@ -65,7 +65,7 @@ func (clnt *Clnt) Attach(afid *Fid, user p.User, aname string) (*Fid, error) {
 }
 
 // Dial a server and return a non-attached client "channel."
-func (ns *Namespace) Dial(addr string) (*Clnt, error) {
+func Dial(addr string) (*Clnt, error) {
 	proto, netaddr, e := parse_net_name(addr)
 	if e != nil {
 		return nil, &p.Error{e.Error(), p.EIO}
@@ -75,7 +75,7 @@ func (ns *Namespace) Dial(addr string) (*Clnt, error) {
 		return nil, &p.Error{e.Error(), p.EIO}
 	}
 
-	clnt, err := ns.Connect(c, 8192+p.IOHDRSZ, true)
+	clnt, err := Connect(c, 8192+p.IOHDRSZ, true)
 	if err != nil {
 		return nil, err
 	}

@@ -41,48 +41,19 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 			qid = fid.Qid
 		}
 		newfid.Qid = qid // it should.
-		update_cname(fid.Cname, wnames, newfid.Cname)
+		newfid.Cname = PathJoin(fid.Cname, wnames)
 		newfid.walked = true
 	}
 
 	return rc.Wqid, nil
 }
 
-// This must also work in the case from=out
-func update_cname(from, add, out []string) {
-	var ndotdot int
-	var s string
-	var t []string
-
-	for ndotdot,s = range add {
-		if s != ".." {
-			break
-		}
-	}
-	npop := ndotdot // shouldn't, but just in case.
-	if npop > len(from) {
-		npop = len(from)
-	}
-
-	if l := len(from)-npop+len(add)-ndotdot; cap(out) < l {
-		t = make([]string, l)
-	} else {
-		t = out[:l]
-	}
-	npop = len(from)-npop
-	copy(t[:npop], from)
-	copy(t[npop:], add[ndotdot:])
-	out = t
-}
-
 // Walks to a named file, using the same algo. as Walk, but always starting
 // from Clnt.Root. Returns a Fid associated with the file, or an Error.
-func (clnt *Clnt) FWalk(path string) (*Fid, error) {
+func (clnt *Clnt) FWalk(wnames []string) (*Fid, error) {
 	var err error = nil
 	var wqid []p.Qid
 
-	e := Parsename(path)
-	wnames := e.Elems
 	newfid := clnt.FidAlloc()
 	fid := clnt.Root
 
@@ -119,10 +90,18 @@ error:
 // sequence and associates the resulting file with newfid. If no wnames
 // were walked successfully, an Error is returned. Otherwise a slice with a
 // Qid for each walked name is returned.
-func (ns *Namespace) Walk(fid *Fid, newfid *Fid, wnames []string) ([]p.Qid, error) {
-	return fid.Walk(newfid, wnames)
+//func (ns *Namespace) Walk(fid *Fid, newfid *Fid, wnames []string) ([]p.Qid, error) {
+//	return fid.Walk(newfid, wnames)
+//}
+func (ns *Namespace) FWalk(e Elemlist) (*Fid, error) {
+	var wnames []string = e.Elems
+	if e.Ref != '/' {
+		wnames = PathJoin(ns.Cwd, e.Elems)
+		//e.Elems = PathJoin(ns.Cwd, e.Elems)
+		//e.Ref = '/'
+	}
+	mh, mpath := mhead_split(ns.Root, wnames)
+
+	return mh.c.FWalk(mpath)
 }
 
-func (ns *Namespace) FWalk(path string) (*Fid, error) {
-	return ns.Root.Clnt.FWalk(path)
-}

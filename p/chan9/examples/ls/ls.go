@@ -14,12 +14,9 @@ var debuglevel = flag.Int("d", 0, "debuglevel")
 var addr = flag.String("addr", "127.0.0.1:5640", "server address")
 
 func main() {
-	var err error
-	var c *chan9.Clnt
 	var file *chan9.File
 	var d []*p.Dir
 	var path []string
-	var ns *chan9.Namespace = chan9.NewNS()
 
 	flag.Parse()
 	chan9.DefaultDebuglevel = *debuglevel
@@ -31,18 +28,24 @@ func main() {
 		path = flag.Args()
 	}
 
-	c, err = ns.Dial(*addr)
+	c, err := chan9.Dial(*addr)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening connection to %s: %s\n", *addr, err)
 		return
 	}
-	err = ns.Mount(c, nil, "/", chan9.MREPL, "")
+	ns, err := chan9.NSFromClnt(c, nil, chan9.MREPL, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", *addr, err)
 		os.Exit(1)
 	}
 
 	for _, arg := range path {
-		file, err = ns.FOpen(arg, p.OREAD)
+		path := chan9.ParseName(arg)
+		file, err = ns.FOpen(path, p.OREAD)
+		if err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			continue
+		}
 		if file.Fid.Qid.Type & p.QTDIR > 0 {
 			if err != nil {
 				log.Println(err)
@@ -58,9 +61,10 @@ func main() {
 					os.Stdout.WriteString(di.Name + "\n")
 				}
 			}
+		} else if ! path.Mustbedir {
+			os.Stdout.WriteString(path.String() + "\n")
 		} else {
-			os.Stdout.WriteString(arg + "\n")
-			//os.Stdout.WriteString(file.Fid.Cname + "\n")
+			os.Stderr.WriteString("Error: file not found.\n")
 		}
 		file.Close()
 

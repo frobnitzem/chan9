@@ -28,7 +28,7 @@ func (fid *Fid) Remove() error {
 }
 
 // Removes the named file. Returns nil if the operation is successful.
-func (ns *Namespace) FRemove(path string) error {
+func (ns *Namespace) FRemove(path Elemlist) error {
 	var err error
 	fid, err := ns.FWalk(path)
 	if err != nil {

@@ -27,7 +27,7 @@ func (fid *Fid) Stat() (*p.Dir, error) {
 }
 
 // Returns the metadata for a named file, or an Error.
-func (ns *Namespace) FStat(path string) (*p.Dir, error) {
+func (ns *Namespace) FStat(path Elemlist) (*p.Dir, error) {
 	fid, err := ns.FWalk(path)
 	if err != nil {
 		return nil, err

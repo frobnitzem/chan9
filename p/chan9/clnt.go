@@ -10,6 +10,7 @@ import (
 	"code.google.com/p/go9p/p"
 	"fmt"
 	"log"
+	"os"
 	"net"
 	"sync"
 	"syscall"
@@ -30,6 +31,7 @@ type StatsOps interface {
 
 var DefaultDebuglevel int
 var DefaultLogger *p.Logger
+var clnts *ClntList
 
 // The Clnt type represents a 9P2000 client. The client is connected to
 // a 9P2000 file server and its methods can be used to access and manipulate
@@ -122,7 +124,7 @@ func (clnt *Clnt) Rpc(tc *p.Fcall) (rc *p.Fcall, err error) {
 	return
 }
 
-func (ns *Namespace) rm(clnt *Clnt, err error) {
+func rm(clnt *Clnt, err error) {
 	clnt.Lock()
 	clnt.conn.Close()
 	clnt.err = err
@@ -140,37 +142,43 @@ func (ns *Namespace) rm(clnt *Clnt, err error) {
 		}
 	}
 
-	ns.clnts.Lock()
-        delete(ns.clnts.c, clnt.Dev)
-	ns.clnts.Unlock()
+	clnts.Lock()
+        delete(clnts.c, clnt.Dev)
+	clnts.Unlock()
 
 	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
 		sop.statsUnregister()
 	}
 }
 
-func (ns *Namespace) incref(clnt *Clnt, e error) (ref int) {
+func (clnt *Clnt) incref() (ref int) {
 	clnt.Lock()
 	clnt.ref++
 	ref = clnt.ref
 	clnt.Unlock()
 	return
 }
-// error message will be set if refcount goes to zero
-// and client is sacked
-func (ns *Namespace) decref(clnt *Clnt, e error) (ref int) {
+
+func (clnt *Clnt) decref() (ref int) {
 	clnt.Lock()
 	clnt.ref--
 	ref = clnt.ref
 	clnt.Unlock()
+	return
+}
+
+// error message will be set if refcount goes to zero
+// and client is sacked
+func edecref(clnt *Clnt, e error) (ref int) {
+	ref = clnt.decref()
 	if ref == 0 {
-		ns.rm(clnt, e)
+		rm(clnt, e)
 	}
 
 	return
 }
 
-func (ns *Namespace) recv(clnt *Clnt) {
+func recv(clnt *Clnt) {
 	buf := make([]byte, clnt.Msize*8)
 	pos := 0
 	for {
@@ -183,7 +191,7 @@ func (ns *Namespace) recv(clnt *Clnt) {
 
 		n, oerr := clnt.conn.Read(buf[pos:len(buf)])
 		if oerr != nil || n == 0 {
-			ns.rm(clnt,&p.Error{oerr.Error(), p.EIO})
+			rm(clnt,&p.Error{oerr.Error(), p.EIO})
 			return
 		}
 
@@ -204,7 +212,7 @@ func (ns *Namespace) recv(clnt *Clnt) {
 			fc, err, fcsize := p.Unpack(buf, clnt.Dotu)
 			clnt.Lock()
 			if err != nil {
-				ns.rm(clnt,err)
+				rm(clnt,err)
 				return
 			}
 
@@ -227,7 +235,7 @@ func (ns *Namespace) recv(clnt *Clnt) {
 			}
 
 			if r == nil {
-				ns.rm(clnt,&p.Error{"unexpected response", p.EINVAL})
+				rm(clnt,&p.Error{"unexpected response", p.EINVAL})
 				return
 			}
 
@@ -267,7 +275,7 @@ func (ns *Namespace) recv(clnt *Clnt) {
 	}
 }
 
-func (ns *Namespace) send(clnt *Clnt) {
+func send(clnt *Clnt) {
 	for {
 		select {
 		case <-clnt.done:
@@ -299,35 +307,37 @@ func (ns *Namespace) send(clnt *Clnt) {
 	}
 }
 
+
 // Creates and initializes a new Clnt object. Doesn't send any data
 // on the wire.
-func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
+func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt := new(Clnt)
 	clnt.conn = c
 	clnt.Msize = msize
 	clnt.Dotu = dotu
-	clnt.User = ns.User
+	clnt.User = p.OsUsers.Uid2User(os.Geteuid())
 	clnt.Subpath = make([]string, 0) // root
 	clnt.tagpool = newPool(uint32(p.NOTAG))
-	clnt.fidpool = ns.fidpool
+	clnt.fidpool = newPool(p.NOFID) // replace when mounting to NS!
+	//clnt.fidpool = ns.fidpool
 	clnt.reqout = make(chan *Req)
 	clnt.done = make(chan bool)
 	clnt.reqchan = make(chan *Req, 16)
 	clnt.tchan = make(chan *p.Fcall, 16)
 	clnt.ref = 1
 
-	clnt.Debuglevel = ns.Debuglevel
+	clnt.Debuglevel = DefaultDebuglevel
 	clnt.Log = DefaultLogger
 
 	//clnt.Type = 0 -- we have no special types for now
-	ns.clnts.Lock()
-	clnt.Dev = ns.clnts.nextdev
-	ns.clnts.c[clnt.Dev] = clnt
-	ns.clnts.nextdev++
-	ns.clnts.Unlock()
+	clnts.Lock()
+	clnt.Dev = clnts.nextdev
+	clnts.c[clnt.Dev] = clnt
+	clnts.nextdev++
+	clnts.Unlock()
 
-	go ns.recv(clnt)
-	go ns.send(clnt)
+	go recv(clnt)
+	go send(clnt)
 
 	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
 		sop.statsRegister()
@@ -339,8 +349,8 @@ func (ns *Namespace) NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 // Establishes a new socket connection to the 9P server and creates
 // a client object for it. Negotiates the dialect and msize for the
 // connection. Returns a Clnt object, or Error.
-func (ns *Namespace) Connect(c net.Conn, msize uint32, dotu bool) (*Clnt, error) {
-	clnt := ns.NewClnt(c, msize, dotu)
+func Connect(c net.Conn, msize uint32, dotu bool) (*Clnt, error) {
+	clnt := NewClnt(c, msize, dotu)
 	clnt.Id = c.RemoteAddr().String() + ":"
 	ver := "9P2000"
 	if clnt.Dotu {
@@ -372,7 +382,7 @@ func (clnt *Clnt) FidAlloc() *Fid {
 	fid.Fid = clnt.fidpool.getId()
 	fid.Clnt = clnt
 	fid.Dev = clnt.Dev
-	fid.Type = clnt.Type
+	//fid.Type = clnt.Type
 	fid.User = clnt.User
 	fid.Cname = make([]string, 0)
 
@@ -443,3 +453,10 @@ func (clnt *Clnt) logFcall(fc *p.Fcall) {
 	}
 }
 
+func init() {
+	clnts = new(ClntList)
+	clnts.c = make(map[uint32]*Clnt)
+	if sop, ok := (interface{}(clnts)).(StatsOps); ok {
+		sop.statsRegister()
+	}
+}

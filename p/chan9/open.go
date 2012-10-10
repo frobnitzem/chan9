@@ -6,7 +6,6 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"strings"
 	"syscall"
 )
 
@@ -64,22 +63,23 @@ func (fid *Fid) Create(name string, perm uint32, mode uint8, ext string) error {
 
 // Creates and opens a named file.
 // Returns the file if the operation is successful, or an Error.
-func (ns *Namespace) FCreate(path string, perm uint32, mode uint8) (*File, error) {
-	n := strings.LastIndex(path, "/")
-	if n < 0 {
-		n = 0
+func (ns *Namespace) FCreate(e Elemlist, perm uint32, mode uint8) (*File, error) {
+	n := len(e.Elems)-1
+	if n < 0 || e.Elems[n] == ".." {
+		return nil, &p.Error{"invalid path", p.ENOENT}
 	}
+	if e.Mustbedir {
+		perm = perm | p.DMDIR
+	}
+	name := e.Elems[n]
+	e.Elems = e.Elems[:n]
 
-	fid, err := ns.FWalk(path[0:n])
+	fid, err := ns.FWalk(e)
 	if err != nil {
 		return nil, err
 	}
 
-	if path[n] == '/' {
-		n++
-	}
-
-	err = fid.Create(path[n:], perm, mode, "")
+	err = fid.Create(name, perm, mode, "")
 	if err != nil {
 		fid.Clunk()
 		return nil, err
@@ -89,7 +89,7 @@ func (ns *Namespace) FCreate(path string, perm uint32, mode uint8) (*File, error
 }
 
 // Opens a named file. Returns the opened file, or an Error.
-func (ns *Namespace) FOpen(path string, mode uint8) (*File, error) {
+func (ns *Namespace) FOpen(path Elemlist, mode uint8) (*File, error) {
 	fid, err := ns.FWalk(path)
 	if err != nil {
 		return nil, err
