@@ -436,7 +436,8 @@ func main() {
 	naddr := *addr
 	c, err = chan9.Dial(*addr)
 	if err != nil {
-		return
+		fmt.Fprintf(os.Stderr, "Error connecting to %s: %s\n", naddr, err)
+		os.Exit(1)
 	}
 
 	if *ouser != "" {
@@ -451,7 +452,7 @@ func main() {
 
 	ns, err = chan9.NSFromClnt(c, nil, chan9.MREPL, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", naddr, err)
+		fmt.Fprintf(os.Stderr, "Error mounting %s: %s\n", naddr, err)
 		os.Exit(1)
 	}
 
