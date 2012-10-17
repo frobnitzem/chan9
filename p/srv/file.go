@@ -49,7 +49,7 @@ type FWriteOp interface {
 // the operation should call (*File)Add() to add the created file to the directory.
 // The operation returns the created file, or the error occured while creating it.
 type FCreateOp interface {
-	Create(fid *FFid, name string, perm uint32) (*File, error)
+	Create(fid *FFid, name string, perm uint32, mode uint8) (*File, error)
 }
 
 // If the FRemoveOp interface is implemented, the Remove operation will be called
@@ -386,7 +386,7 @@ func (*Fsrv) Create(req *Req) {
 	}
 
 	if cop, ok := (dir.ops).(FCreateOp); ok {
-		f, err := cop.Create(fid, tc.Name, tc.Perm)
+		f, err := cop.Create(fid, tc.Name, tc.Perm, tc.Mode)
 		if err != nil {
 			req.RespondError(err)
 		} else {
