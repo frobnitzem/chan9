@@ -67,13 +67,14 @@ const (
 
 // Flags for the mode field in Topen and Tcreate messages
 const (
-	OREAD   = 0  // open read-only
-	OWRITE  = 1  // open write-only
-	ORDWR   = 2  // open read-write
-	OEXEC   = 3  // execute (== read but check execute permission)
-	OTRUNC  = 16 // or'ed in (except for exec), truncate file first
-	OCEXEC  = 32 // or'ed in, close on exec
-	ORCLOSE = 64 // or'ed in, remove on close
+	OREAD   uint8 = 0  // open read-only
+	OWRITE  uint8 = 1  // open write-only
+	ORDWR   uint8 = 2  // open read-write
+	OEXEC   uint8 = 3  // execute (== read but check execute permission)
+	OTRUNC  uint8 = 16 // or'ed in (except for exec), truncate file first
+	OCEXEC  uint8 = 32 // or'ed in, close on exec
+	ORCLOSE uint8 = 64 // or'ed in, remove on close
+	//OEXCL   = 0x1000 // or'ed in, exclusive use (create only)
 )
 
 // File modes

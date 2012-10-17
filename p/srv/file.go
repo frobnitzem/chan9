@@ -361,10 +361,16 @@ func (*Fsrv) Open(req *Req) {
 	fid := req.Fid.Aux.(*FFid)
 	tc := req.Tc
 
+	_, err := openmode(tc.Mode)//&^p.OEXCL)
+	if err != nil {
+		req.RespondError(err)
+		return
+	}
 	if !fid.F.CheckPerm(req.Fid.User, mode2Perm(tc.Mode)) {
 		req.RespondError(Eperm)
 		return
 	}
+	fid.Fid.Omode = tc.Mode
 
 	if op, ok := (fid.F.ops).(FOpenOp); ok {
 		err := op.Open(fid, tc.Mode)
@@ -384,6 +390,12 @@ func (*Fsrv) Create(req *Req) {
 		req.RespondError(Eperm)
 		return
 	}
+	_, err := openmode(tc.Mode)//&^p.OEXCL)
+	if err != nil {
+		req.RespondError(err)
+		return
+	}
+	fid.Fid.Omode = tc.Mode
 
 	if cop, ok := (dir.ops).(FCreateOp); ok {
 		f, err := cop.Create(fid, tc.Name, tc.Perm, tc.Mode)
@@ -407,6 +419,11 @@ func (*Fsrv) Read(req *Req) {
 	tc := req.Tc
 	rc := req.Rc
 	p.InitRread(rc, tc.Count)
+
+	if fid.Fid.Omode&3 == p.OWRITE {
+			req.RespondError(Ebaduse)
+			return
+	}
 
 	if f.Mode&p.DMDIR != 0 {
 		// directory
@@ -467,6 +484,10 @@ func (*Fsrv) Write(req *Req) {
 	f := fid.F
 	tc := req.Tc
 
+	if mode := fid.Fid.Omode&3; mode != p.OWRITE && mode != p.ORDWR {
+			req.RespondError(Ebaduse)
+			return
+	}
 	if wop, ok := (f.ops).(FWriteOp); ok {
 		n, err := wop.Write(fid, tc.Data, tc.Offset)
 		if err != nil {
@@ -565,3 +586,20 @@ func (*Fsrv) FidDestroy(ffid *Fid) {
 		op.FidDestroy(fid)
 	}
 }
+
+/* Translation from Inferno's sysfile.c
+*/
+func openmode(o uint8) (uint8, error) {
+        if o >= (p.OTRUNC|p.OCEXEC|p.ORCLOSE|p.OEXEC) {
+                return 0, Ebadarg
+	}
+        o &= ^(p.OTRUNC|p.OCEXEC|p.ORCLOSE)
+        if o > p.OEXEC {
+                return 0, Ebadarg
+	}
+        if o == p.OEXEC {
+                return p.OREAD, nil
+	}
+        return o, nil
+}
+

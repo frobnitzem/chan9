@@ -36,6 +36,7 @@ var Ebaduse error = &p.Error{"bad use of fid", p.EINVAL}
 var Eopen error = &p.Error{"fid already opened", p.EINVAL}
 var Enotdir error = &p.Error{"not a directory", p.ENOTDIR}
 var Eperm error = &p.Error{"permission denied", p.EPERM}
+var Ebadarg error = &p.Error{"bad argument", p.EINVAL}
 var Etoolarge error = &p.Error{"i/o count too large", p.EINVAL}
 var Ebadoffset error = &p.Error{"bad offset in directory read", p.EINVAL}
 var Edirchange error = &p.Error{"cannot convert between files and directories", p.EINVAL}
