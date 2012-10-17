@@ -18,12 +18,18 @@ var addr = flag.String("addr", "127.0.0.1:5640", "network address")
 func main() {
 	var user p.User
 	var file *clnt.File
+	var c *tls.Conn
 
 	flag.Parse()
 	user = p.OsUsers.Uid2User(os.Geteuid())
 	clnt.DefaultDebuglevel = *debuglevel
 
-	c, oerr := tls.Dial("tcp", *addr, &tls.Config{
+	proto, naddr, oerr := p.ParseNetName(*addr)
+	if oerr != nil {
+		log.Println("Error parsing addr: %s, %s\n", *addr, oerr.Error())
+		return
+	}
+	c, oerr = tls.Dial(proto, naddr, &tls.Config{
 		Rand: rand.Reader,
 		InsecureSkipVerify: true,
 	})

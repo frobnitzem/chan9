@@ -15,6 +15,7 @@ var addr = flag.String("addr", "127.0.0.1:5640", "network address")
 func main() {
 	var user p.User
 	var err error
+	var proto, naddr string
 	var c *clnt.Clnt
 	var file *clnt.File
 	var d []*p.Dir
@@ -22,7 +23,11 @@ func main() {
 	flag.Parse()
 	user = p.OsUsers.Uid2User(os.Geteuid())
 	clnt.DefaultDebuglevel = *debuglevel
-	c, err = clnt.Mount("tcp", *addr, "", user)
+	proto, naddr, err = p.ParseNetName(*addr)
+	if err != nil {
+		goto error
+	}
+	c, err = clnt.Mount(proto, naddr, "", user)
 	if err != nil {
 		goto error
 	}

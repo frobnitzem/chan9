@@ -8,6 +8,8 @@ package p
 
 import (
 	"fmt"
+	"net"
+	"strings"
 	"syscall"
 )
 
@@ -530,3 +532,60 @@ func (err *Error) Error() string {
 
 	return ""
 }
+
+/* From http://swtch.com/plan9port/man/man3/dial.html
+   addr is a network address of the form network!netaddr!service,
+   network!netaddr, or simply netaddr. Network is tcp, udp, unix,
+   or the special token, net. Net is a free variable that stands
+   for any network in common between the source and the host netaddr.
+   Netaddr can be a host name, a domain name, or a network address. 
+
+   -- we should subtract the "net" option and add, from the Dial package:
+    Known networks are "tcp", "tcp4" (IPv4-only), "tcp6" (IPv6-only), "udp",
+    "udp4" (IPv4-only), "udp6" (IPv6-only), "ip", "ip4" (IPv4-only),
+    "ip6" (IPv6-only), "unix" and "unixpacket".
+
+    For TCP and UDP networks, addresses have the form host:port.
+    If host is a literal IPv6 address, it must be enclosed in square brackets.
+    The functions JoinHostPort and SplitHostPort manipulate addresses in this form. 
+ */
+func ParseNetName(addr string) (string, string, error) {
+	var proto string
+	var a []string
+	var netaddr string
+
+	a = strings.Split(addr, "!")
+	l := len(a)
+	if l < 1 || l > 3 {
+		return "", "", &Error{"unable to parse name", EINVAL}
+	}
+	if l >= 2 {
+		proto = a[0]
+		netaddr = a[1]
+	} else {
+		netaddr = a[0]
+	}
+	//if netaddr == "" {
+	//	return "", "", &Error{"unable to parse name", EINVAL}
+	//}
+	if proto == "" { // Detect network type
+		/*if strings.Count(netaddr, "." == 3) && (
+			for i,v := range(strings.Split(netaddr, ".") {
+				if _, ok := strconv.Atoi(); !ok {
+					break
+				}
+			})
+		} */
+		proto = "tcp" // or just guess
+	}
+
+	if len(a) == 3 {
+		port, e := net.LookupPort(proto, a[2])
+		if e != nil {
+			return "", "", e
+		}
+		netaddr = net.JoinHostPort(netaddr, fmt.Sprintf("%d", port))
+	}
+	return proto, netaddr, nil
+}
+

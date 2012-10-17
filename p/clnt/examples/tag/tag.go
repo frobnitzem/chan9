@@ -19,12 +19,17 @@ func main() {
 	var rchan chan *clnt.Req
 	var tag *clnt.Tag
 	var fid *clnt.Fid
+	var c *clnt.Clnt
 	var wnames []string
 
 	flag.Parse()
 	user = p.OsUsers.Uid2User(os.Geteuid())
 	clnt.DefaultDebuglevel = *debuglevel
-	c, err := clnt.Mount("tcp", *addr, "", user)
+	proto, naddr, err := p.ParseNetName(*addr)
+	if err != nil {
+		goto error
+	}
+	c, err = clnt.Mount(proto, naddr, "", user)
 	if err != nil {
 		goto error
 	}

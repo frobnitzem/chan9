@@ -454,11 +454,16 @@ func main() {
 		user = p.OsUsers.Uname2User(*ouser)
 	}
 
-	naddr := *addr
-	if strings.LastIndex(naddr, ":") == -1 {
+	proto, naddr, e := p.ParseNetName(*addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing addr %s: %s\n", *addr, e)
+		os.Exit(1)
+	}
+
+	if proto == "tcp" && strings.LastIndex(naddr, ":") == -1 {
 		naddr = naddr + ":5640"
 	}
-	c, err = clnt.Mount("tcp", naddr, "", user)
+	c, err = clnt.Mount(proto, naddr, "", user)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error mounting %s: %s\n", naddr, err)
 		os.Exit(1)

@@ -16,6 +16,7 @@ func main() {
 	var n, m int
 	var user p.User
 	var err error
+	var proto, naddr string
 	var c *clnt.Clnt
 	var file *clnt.File
 	var buf []byte
@@ -23,7 +24,11 @@ func main() {
 	flag.Parse()
 	user = p.OsUsers.Uid2User(os.Geteuid())
 	clnt.DefaultDebuglevel = *debuglevel
-	c, err = clnt.Mount("tcp", *addr, "", user)
+	proto, naddr, err = p.ParseNetName(*addr)
+	if err != nil {
+		goto error
+	}
+	c, err = clnt.Mount(proto, naddr, "", user)
 	if err != nil {
 		goto error
 	}
