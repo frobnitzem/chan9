@@ -52,17 +52,14 @@ const (
 	PORT    = 564            // default port for 9P file servers
 )
 
-// Qid types
 const (
-	QTDIR     = 0x80 // directories
-	QTAPPEND  = 0x40 // append only files
-	QTEXCL    = 0x20 // exclusive use files
-	QTMOUNT   = 0x10 // mounted channel
-	QTAUTH    = 0x08 // authentication file
-	QTTMP     = 0x04 // non-backed-up file
-	QTSYMLINK = 0x02 // symbolic link (Unix, 9P2000.u)
-	QTLINK    = 0x01 // hard link (Unix, 9P2000.u)
-	QTFILE    = 0x00
+	MORDER	= 0x0003	/* mask for bits defining order of mounting */
+	MREPL	= 0x0000	/* mount replaces object */
+	MBEFORE	= 0x0001	/* mount goes before others in union directory */
+	MAFTER	= 0x0002	/* mount goes after others in union directory */
+	MCREATE	= 0x0004	/* permit creation in mounted directory */
+	MCACHE	= 0x0010	/* cache some data */
+	MMASK	= 0x0017	/* all bits on */
 )
 
 // Flags for the mode field in Topen and Tcreate messages
@@ -75,6 +72,19 @@ const (
 	OCEXEC  uint8 = 32 // or'ed in, close on exec
 	ORCLOSE uint8 = 64 // or'ed in, remove on close
 	//OEXCL   = 0x1000 // or'ed in, exclusive use (create only)
+)
+
+// Qid types
+const (
+	QTDIR     = 0x80 // directories
+	QTAPPEND  = 0x40 // append only files
+	QTEXCL    = 0x20 // exclusive use files
+	QTMOUNT   = 0x10 // mounted channel
+	QTAUTH    = 0x08 // authentication file
+	QTTMP     = 0x04 // non-backed-up file
+	QTSYMLINK = 0x02 // symbolic link (Unix, 9P2000.u)
+	QTLINK    = 0x01 // hard link (Unix, 9P2000.u)
+	QTFILE    = 0x00
 )
 
 // File modes
