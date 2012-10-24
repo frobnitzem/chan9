@@ -131,6 +131,9 @@ func (clnt *Clnt) Rpc(tc *p.Fcall) (rc *p.Fcall, err error) {
 }
 
 func rm(clnt *Clnt, err error) {
+	if clnt == nil {
+		return
+	}
 	clnt.Lock()
 	clnt.conn.Close()
 	clnt.err = err
@@ -166,6 +169,9 @@ func (clnt *Clnt) incref() (ref int) {
 }
 
 func (clnt *Clnt) decref() (ref int) {
+	if clnt == nil {
+		return 0
+	}
 	clnt.Lock()
 	clnt.ref--
 	ref = clnt.ref

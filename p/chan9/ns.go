@@ -33,14 +33,15 @@ type Namespace struct {
 func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, error) {
 	ns := new(Namespace)
 	//ns.User = c.User // p.OsUsers.Uid2User(os.Geteuid())
-        ns.fidpool = c.fidpool // newPool(p.NOFID)
+	ns.fidpool = c.fidpool // newPool(p.NOFID)
 
 	ns.Root = new(NSElem)
 	ns.Root.Etype = NSPASS
 	ns.Root.Cname = make([]string, 0)
-	ns.Root.MayCreate = flags & p.DMWRITE != 0 // TODO: check. flags option to Mount.
+	ns.Root.MayCreate = flags&p.MCREATE != 0
+	ns.Root.MayCache = flags&p.MCACHE != 0
 	ns.Root.Child = make(map[string]*NSElem)
-	ns.Root.c = c
+	ns.Root.c = nil
 	ns.Root.Parent = make([]*NSElem, 1)
 	ns.Root.Parent[0] = ns.Root
 	ns.Cwd = make([]string, 0)
@@ -54,8 +55,9 @@ func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, erro
 }
 
 /* Clone a namespace object, uses copy-on-write semantics.
+   TODO: currently incorrectly implemented
  */
-func (ons *Namespace) Clone() (*Namespace, error) {
+func (ons *Namespace) clone() (*Namespace, error) {
 	ns := new(Namespace)
 
 	ons.Lock()
@@ -75,6 +77,7 @@ func (ons *Namespace) Clone() (*Namespace, error) {
 }
 
 func (ns *Namespace) Close() {
+	// Not implemented
 	return
 }
 

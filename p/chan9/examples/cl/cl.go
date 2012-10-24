@@ -450,7 +450,7 @@ func main() {
 		c.Debuglevel = 2
 	}
 
-	ns, err = chan9.NSFromClnt(c, nil, chan9.MREPL, "")
+	ns, err = chan9.NSFromClnt(c, nil, p.MREPL|p.MCREATE, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error mounting %s: %s\n", naddr, err)
 		os.Exit(1)

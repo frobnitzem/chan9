@@ -48,6 +48,7 @@ func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, an
 	l := NewNSElem(loc.Cname...)
 	l.Etype = NSMOUNT
 	l.c = clnt
+	clnt.incref()
 	l.MayCreate = flags&p.MCREATE != 0
 	l.MayCache = flags&p.MCACHE != 0
 	ns.replace(loc, l, flags)
@@ -74,7 +75,7 @@ func (ns *Namespace) replace(loc, e *NSElem, flags uint32) {
 }
 
 func (ns *Namespace) _replace(loc, e *NSElem, flags uint32) {
-	if flags&p.MREPL != 0 { // don't need the client pointer in any case.
+	if flags&p.MORDER == p.MREPL { // don't need the client pointer in any case.
 		ns.unlink(loc)
 		loc.Etype = e.Etype
 		loc.c = e.c
@@ -127,6 +128,9 @@ func (ns *Namespace) Extend(mhead *NSElem, dirs []string) (end *NSElem, err erro
 	loc := mhead
 	next := loc
 
+	if len(dirs) == 0 { // corner case, important for bootstrapping
+		return mhead, nil
+	}
 	for i = 0; i < len(dirs); i++ {
 		next = loc.Lookup(dirs[i])
 		if next == nil || next.Etype != NSPASS {
