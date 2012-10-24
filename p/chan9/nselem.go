@@ -3,6 +3,7 @@ package chan9
 import (
 	"strings"
 	"unicode/utf8"
+	"code.google.com/p/go9p/p"
 )
 
 // List of path elements.
@@ -52,55 +53,66 @@ type NSElem struct {
 	Etype int
 	Cname []string // path taken to create elem
 	MayCreate bool // have to store original create/mount info.
-	c *Clnt // used if Etype == NSMOUNT
+	MayCache bool // may cache some data.
+	c *Clnt // used if Etype == NSMOUNT or NSPASS
 	u []*NSElem // used if Etype == NSUNION
 	Child map[string]*NSElem // dir tree - used if ETYPE != NSUNION
         Parent []*NSElem // list of parents
-			 // This is important for GC-ing the namespace
-			 // after mounts / binds have taken place.
-                         // Indeterminism in naming the path is avoided
-                         // by checking the Cname with the issuing call's '..'.
 }
 
-/* NSElem */
-func (mhead *NSElem) Birth(child string, m *NSElem) (*NSElem) {
-	if m == nil {
-		m := new(NSElem)
-		m.Etype = NSPASS
-		m.Cname = make([]string, len(mhead.Cname)+1)
-		copy(m.Cname, mhead.Cname)
-		m.Cname[len(mhead.Cname)] = child
-		m.c = mhead.c
-		m.MayCreate = mhead.MayCreate
-		m.Parent = make([]*NSElem, 1)
-		m.Parent[0] = mhead
-		m.Child = make(map[string]*NSElem)
-	}
+/* We're staying with the same client, and just adding NSPASS types.
+ * The parent should not be NSUNION.
+ */
+func (ns *Namespace) Birth(mhead *NSElem, child string) (*NSElem) {
+	m := new(NSElem)
+	m.Etype = NSPASS
+	m.Cname = make([]string, len(mhead.Cname)+1)
+	copy(m.Cname, mhead.Cname)
+	m.Cname[len(mhead.Cname)] = child
+	m.c = mhead.c
+	m.c.incref()
+	m.MayCreate = mhead.MayCreate
+	m.Parent = make([]*NSElem, 1)
+	m.Parent[0] = mhead
+	m.Child = make(map[string]*NSElem)
 
 	switch mhead.Etype {
 	case NSUNION:
-		for _,d := range mhead.u {
-			if d.MayCreate {
-				d.Birth(child, m)
-				break
-			}
-		}
+		return nil
 	case NSPASS:
 		fallthrough
 	case NSMOUNT:
 		fallthrough
 	default:
-		mhead.Child[child] = m
+		ns.replace_child(mhead, child, m)
 	}
 
 	return m
 }
 
+func (ns *Namespace) replace_child(p *NSElem, name string, c *NSElem) {
+	oc := p.Child[name]
+	if oc != nil {
+		ns.unlink(oc)
+	}
+	p.Child[name] = c
+}
+
+/*
+func (ns *Namespace) append_child(p *NSElem, name string, c *NSElem) {
+	oc := p.Child[name]
+	if oc != nil {
+		ns.unlink(c)
+	} else {
+		p.Child[name] = c
+	}
+}*/
+
 func (mhead *NSElem) Lookup(child string) (next *NSElem) {
 	switch mhead.Etype {
 	case NSUNION:
 		for _,d := range mhead.u {
-			next := d.Lookup(child)
+			next = d.Lookup(child)
 			if next != nil {
 				break
 			}
@@ -255,3 +267,118 @@ func (e *Elemlist) String() string {
 
 	return hd + strings.Join(e.Elems, "/") + tl
 }
+
+/* Unlink the children of the current NSElem,
+   and remove loc->c (client connection) if not NSUNION.
+ */
+func (ns *Namespace) unlink(loc *NSElem) {
+	switch loc.Etype {
+	case NSMOUNT:
+		fallthrough
+	case NSPASS:
+		loc.c.edecref(&p.Error{"Sayonara", p.EINVAL})
+	case NSUNION:
+	}
+
+	op := func() {
+		loc.Child = make(map[string]*NSElem)
+		loc.u = nil
+		loc.Etype = NSPASS
+	}
+	ns.gc(op)
+}
+
+func (ns *Namespace) remove(loc *NSElem) {
+	ns.unlink(loc)
+	// TODO: go through parents and remove ref.
+}
+
+/* Container for GC-ed alterations to the namespace.
+   It lists the currently reachable objects, calls
+   its callback, then re-lists the reachable objects,
+   removing any NSElems that have fallen off the wagon.
+ */
+func (ns *Namespace) gc(op func()) {
+	elems := make([]*NSElem, 0)
+	f := func(e *NSElem) bool {
+		elems = append(elems, e)
+		return true
+	}
+	visit(f, ns.Root)
+	i := 0
+	f = func(e *NSElem) bool {
+		j, ok := find_elem(elems[i:], e)
+		if !ok {
+			return true
+		}
+		j += i
+		t := elems[j]
+		elems[j] = elems[i]
+		elems[i] = t
+		i++
+		return true
+	}
+	op()
+	visit(f, ns.Root)
+
+	for _, par := range elems[i:] {
+		if par.Etype != NSUNION {
+			par.c.edecref(&p.Error{"GC Sayonara", p.EINVAL})
+		}
+	}
+	for _, child := range elems[:i] {
+		for _, par := range elems[i:] {
+			child.Parent = remove_from(child.Parent, par)
+		}
+	}
+}
+
+func visit(f func(*NSElem)bool, loc *NSElem) {
+	if ! f(loc) {
+		return
+	}
+	switch loc.Etype {
+	case NSMOUNT:
+		fallthrough
+	case NSPASS:
+		for _, child := range loc.Child {
+			visit(f, child)
+		}
+	case NSUNION:
+		for _, child := range loc.u {
+			visit(f, child)
+		}
+	}
+}
+
+func find_elem(elems []*NSElem, e *NSElem) (int, bool) {
+	var i int
+	var v *NSElem
+
+	for i, v = range elems {
+		if v == e {
+			return i, true
+		}
+	}
+	return len(elems), false
+}
+
+/* Generic function to remove val from slice.
+ */
+func remove_from(slice []*NSElem, val *NSElem) []*NSElem {
+        var off int
+        for i, v := range slice {
+                slice[i-off] = slice[i]
+                if v == val {
+                        off++
+                }
+        }
+        return slice[:len(slice)-off]
+}
+
+/*  Garbage-collect a set of NSElems by checking whether
+    a path to the root of the tree exists.
+ */
+func (ns *Namespace) gc_set(s []*NSElem) {
+}
+

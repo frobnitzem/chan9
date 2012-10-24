@@ -15,12 +15,6 @@ import (
 	"sync"
 )
 
-type ClntList struct {
-	sync.Mutex
-	c map[uint32]*Clnt
-	nextdev uint32
-}
-
 // The top-level namespace keeps track
 // of the mounted p9 clients and the user's fid-s.
 type Namespace struct {
@@ -44,7 +38,7 @@ func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, erro
 	ns.Root = new(NSElem)
 	ns.Root.Etype = NSPASS
 	ns.Root.Cname = make([]string, 0)
-	ns.Root.MayCreate = flags & p.DMWRITE > 0 // TODO: check. flags option to Mount.
+	ns.Root.MayCreate = flags & p.DMWRITE != 0 // TODO: check. flags option to Mount.
 	ns.Root.Child = make(map[string]*NSElem)
 	ns.Root.c = c
 	ns.Root.Parent = make([]*NSElem, 1)

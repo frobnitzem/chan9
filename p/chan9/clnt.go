@@ -29,6 +29,12 @@ type StatsOps interface {
 	statsUnregister()
 }
 
+type ClntList struct {
+	sync.Mutex
+	c map[uint32]*Clnt
+	nextdev uint32
+}
+
 var DefaultDebuglevel int
 var DefaultLogger *p.Logger
 var clnts *ClntList
@@ -169,7 +175,7 @@ func (clnt *Clnt) decref() (ref int) {
 
 // error message will be set if refcount goes to zero
 // and client is sacked
-func edecref(clnt *Clnt, e error) (ref int) {
+func (clnt *Clnt) edecref(e error) (ref int) {
 	ref = clnt.decref()
 	if ref == 0 {
 		rm(clnt, e)
