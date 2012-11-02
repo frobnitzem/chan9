@@ -32,20 +32,24 @@ var cmds map[string]*Cmd
 
 func init() {
 	cmds = make(map[string]*Cmd)
-	cmds["write"] = &Cmd{cmdwrite, "write file string [...]\t«write the unmodified string to file, create file if necessary»"}
-	cmds["echo"] = &Cmd{cmdecho, "echo file string [...]\t«echo string to file (newline appended)»"}
-	cmds["stat"] = &Cmd{cmdstat, "stat file [...]\t«stat file»"}
-	cmds["ls"] = &Cmd{cmdls, "ls [-l] file [...]\t«list contents of directory or file»"}
-	cmds["cd"] = &Cmd{cmdcd, "cd dir\t«change working directory»"}
-	cmds["cat"] = &Cmd{cmdcat, "cat file [...]\t«print the contents of file»"}
-	cmds["mkdir"] = &Cmd{cmdmkdir, "mkdir dir [...]\t«create dir on remote server»"}
-	cmds["get"] = &Cmd{cmdget, "get file [local]\t«get file from remote server»"}
-	cmds["put"] = &Cmd{cmdput, "put file [remote]\t«put file on the remote server as 'file'»"}
-	cmds["pwd"] = &Cmd{cmdpwd, "pwd\t«print working directory»"}
-	cmds["rm"] = &Cmd{cmdrm, "rm file [...]\t«remove file from remote server»"}
-	cmds["help"] = &Cmd{cmdhelp, "help [cmd]\t«print available commands or help on cmd»"}
-	cmds["quit"] = &Cmd{cmdquit, "quit\t«exit»"}
-	cmds["exit"] = &Cmd{cmdquit, "exit\t«quit»"}
+	cmds["write"]   = &Cmd{cmdwrite, "write file string [...]\t«write the unmodified string to file, create file if necessary»"}
+	cmds["echo"]    = &Cmd{cmdecho, "echo file string [...]\t«echo string to file (newline appended)»"}
+	cmds["stat"]    = &Cmd{cmdstat, "stat file [...]\t«stat file»"}
+	cmds["ls"]      = &Cmd{cmdls, "ls [-l] file [...]\t«list contents of directory or file»"}
+	cmds["cd"]      = &Cmd{cmdcd, "cd dir\t«change working directory»"}
+	cmds["cat"]     = &Cmd{cmdcat, "cat file [...]\t«print the contents of file»"}
+	cmds["mkdir"]   = &Cmd{cmdmkdir, "mkdir dir [...]\t«create dir on remote server»"}
+	cmds["get"]     = &Cmd{cmdget, "get file [local]\t«get file from remote server»"}
+	cmds["put"]     = &Cmd{cmdput, "put file [remote]\t«put file on the remote server as 'file'»"}
+	cmds["mount"]   = &Cmd{cmdmount, "mount remote mountpoint\t«mount the remote server on mountpoint»"}
+	cmds["bind"]    = &Cmd{cmdbind, "bind target mountpoint\t«mount the target directory on mountpoint»"}
+	cmds["lsmount"] = &Cmd{cmdlsmount, "lsmount mountpoint\t«list the mounts from/to mountpoint»"}
+	cmds["umount"]  = &Cmd{cmdumount, "umount remote mountpoint\t«remove the given mount»"}
+	cmds["pwd"]     = &Cmd{cmdpwd, "pwd\t«print working directory»"}
+	cmds["rm"]      = &Cmd{cmdrm, "rm file [...]\t«remove file from remote server»"}
+	cmds["help"]    = &Cmd{cmdhelp, "help [cmd]\t«print available commands or help on cmd»"}
+	cmds["quit"]    = &Cmd{cmdquit, "quit\t«exit»"}
+	cmds["exit"]    = &Cmd{cmdquit, "exit\t«quit»"}
 }
 
 func b(mode uint32, s uint8) string {
@@ -348,6 +352,81 @@ func cmdput(s []string) {
 			fmt.Fprintf(os.Stderr, "short write %s\n", to)
 			return
 		}
+	}
+}
+
+func helpstring(cmd string) string {
+	k, ok := cmds[cmd]
+	if !ok {
+		return "No help for "+cmd
+	}
+	return k.help
+}
+
+// Mount the given network name on mountpoint
+func cmdmount(s []string) {
+	if len(s) != 2 {
+		fmt.Fprintf(os.Stderr, "%s\n", helpstring("mount"))
+		return
+	}
+	c, err := chan9.Dial(s[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening connection to %s: %s\n", s[0], err)
+		return
+	}
+	err = ns.Mount(c, nil, s[1], p.MBEFORE, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error mounting connection to %s: %s\n", s[0], err)
+		c.Clunk(err)
+		return
+	}
+}
+
+// Mount the given dir on mountpoint
+func cmdbind(s []string) {
+	if len(s) != 2 {
+		fmt.Fprintf(os.Stderr, "%s\n", helpstring("bind"))
+		return
+	}
+	err := ns.Bind(s[0], s[1], p.MBEFORE)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error binding %s to %s: %s\n", s[1], s[0], err)
+		return
+	}
+}
+
+// List the mounts from/to the given dir.
+func cmdlsmount(s []string) {
+	if len(s) != 1 {
+		fmt.Fprintf(os.Stderr, "%s\n", helpstring("lsmount"))
+		return
+	}
+	parents, children, err := ns.LsMounts(s[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		return
+	}
+	str := "Parents:"
+	for _, pa := range parents {
+		str = str+"\n\t"+pa
+	}
+	str = str+"\nChildren:"
+	for _, ch := range children {
+		str = str+"\n\t"+ch
+	}
+	fmt.Fprintf(os.Stdout, "%s\n", str)
+}
+
+// Remove the given mount.
+func cmdumount(s []string) {
+	if len(s) != 2 {
+		fmt.Fprintf(os.Stderr, "%s\n", helpstring("umount"))
+		return
+	}
+	err := ns.Unmount(s[0], s[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		return
 	}
 }
 

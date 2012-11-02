@@ -130,6 +130,10 @@ func (clnt *Clnt) Rpc(tc *p.Fcall) (rc *p.Fcall, err error) {
 	return
 }
 
+func (clnt *Clnt) Clunk(err error) {
+	clnt.edecref(err)
+}
+
 func rm(clnt *Clnt, err error) {
 	if clnt == nil {
 		return
@@ -351,9 +355,9 @@ func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	go recv(clnt)
 	go send(clnt)
 
-	if sop, ok := (interface{}(clnt)).(StatsOps); ok {
-		sop.statsRegister()
-	}
+	//if sop, ok := (interface{}(clnt)).(StatsOps); ok {
+	//	sop.statsRegister()
+	//}
 
 	return clnt
 }

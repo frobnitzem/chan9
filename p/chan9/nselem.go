@@ -30,21 +30,6 @@ const (
 	NSUNION = 2	// union mount - provides a linked list to the mount-pts
 )
 
-/*type NSMount struct {
-        Type uint16 // Although "ChanOps" interface deprecates
-                        // the Type field, it could be informative.
-        Dev uint32 // Device number for this channel
-        *Clnt // embed the channel interface (just the client for now)
-		// contains "Root" = Fid of mounted root
-}*/
-
-/*
-type NSUnion struct {
-	Spath []*NSElem // Search path of files residing "here"
-			// This implies their names are irrelevant,
-			// over-written by name of NSElem that ref-s me.
-}*/
-
 /* The NSElem mirrors the directory tree, acting as an overlay to
  * connected 9p servers.
  * It is polymorphic according to Etype.
@@ -289,8 +274,16 @@ func (ns *Namespace) unlink(loc *NSElem) {
 }
 
 func (ns *Namespace) remove(loc *NSElem) {
+	/*for _, par := range loc.Parent {
+		switch par.Etype {
+		case NSPASS:
+			fallthrough
+		case NSMOUNT:
+			delete(par.Child, loc)
+		case NSUNION:
+			par.u = remove_from(par.u, loc)
+	} - done by GC */
 	ns.unlink(loc)
-	// TODO: go through parents and remove ref.
 }
 
 /* Container for GC-ed alterations to the namespace.
@@ -301,10 +294,10 @@ func (ns *Namespace) remove(loc *NSElem) {
 func (ns *Namespace) gc(op func()) {
 	elems := make([]*NSElem, 0)
 	f := func(e *NSElem) bool {
-		elems = append(elems, e)
+		//elems = append(elems, e)
 		return true
 	}
-	visit(f, ns.Root)
+	elems = visit(f, ns.Root, elems)
 	i := 0
 	f = func(e *NSElem) bool {
 		j, ok := find_elem(elems[i:], e)
@@ -319,7 +312,7 @@ func (ns *Namespace) gc(op func()) {
 		return true
 	}
 	op()
-	visit(f, ns.Root)
+	visit(f, ns.Root, make([]*NSElem, len(elems)))
 
 	for _, par := range elems[i:] {
 		if par.Etype != NSUNION {
@@ -333,22 +326,28 @@ func (ns *Namespace) gc(op func()) {
 	}
 }
 
-func visit(f func(*NSElem)bool, loc *NSElem) {
-	if ! f(loc) {
-		return
+func visit(f func(*NSElem)bool, loc *NSElem, prev []*NSElem) []*NSElem {
+	_, ok := find_elem(prev, loc)
+	if ok {
+		return prev
+	}
+	prev = append(prev, loc)
+	if !f(loc) {
+		return prev
 	}
 	switch loc.Etype {
 	case NSMOUNT:
 		fallthrough
 	case NSPASS:
 		for _, child := range loc.Child {
-			visit(f, child)
+			prev = visit(f, child, prev)
 		}
 	case NSUNION:
 		for _, child := range loc.u {
-			visit(f, child)
+			prev = visit(f, child, prev)
 		}
 	}
+	return prev
 }
 
 func find_elem(elems []*NSElem, e *NSElem) (int, bool) {
@@ -374,11 +373,5 @@ func remove_from(slice []*NSElem, val *NSElem) []*NSElem {
                 }
         }
         return slice[:len(slice)-off]
-}
-
-/*  Garbage-collect a set of NSElems by checking whether
-    a path to the root of the tree exists.
- */
-func (ns *Namespace) gc_set(s []*NSElem) {
 }
 

@@ -88,7 +88,7 @@ type Fid struct {
 	Clnt   *Clnt // Client the fid belongs to
 	Cname	[]string
 	Iounit uint32
-	//Type uint16   // Channel type (index of function call table) -- FYI
+	Type uint16   // Channel type (index of function call table) -- FYI
 	Dev uint32    // Server or device number distinguishing the server from others of the same type
 			// duplicates Clnt * info
 	p.Qid         // The Qid description for the file

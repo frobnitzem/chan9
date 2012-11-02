@@ -2,6 +2,7 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
+	"strings"
 )
 
 
@@ -141,12 +142,13 @@ func (ns *Namespace) Extend(mhead *NSElem, dirs []string) (end *NSElem, err erro
 
 	// Trust, but verify.
 	newfid := mhead.c.FidAlloc()
-	qids, err := mhead.c.Root.Walk(newfid, PathJoin(mhead.Cname, dirs[:i]))
+	dpath := PathJoin(mhead.Cname, dirs[:i])
+	qids, err := mhead.c.Root.Walk(newfid, dpath)
 	if err != nil {
 		return nil, err
 	}
 	newfid.Clunk()
-	if j := i+len(mhead.Cname)-len(qids); j != 0 {
+	if j := len(dpath)-len(qids); j != 0 {
 		if j == 1 { // found nselem, but couldn't walk it
 			ns.remove(next)
 			return nil, &p.Error{"Remote dir removed", p.ENOENT}
@@ -158,8 +160,9 @@ func (ns *Namespace) Extend(mhead *NSElem, dirs []string) (end *NSElem, err erro
 	if i == len(dirs) {
 		return loc, nil
 	}
-	for _,p := range dirs[i:] {
-		loc = ns.Birth(loc, p)
+	next = loc
+	for _,dir := range dirs[i:] {
+		loc = ns.Birth(loc, dir)
 	}
 	return ns.Extend(next, dirs[i:])
 }
@@ -191,9 +194,9 @@ func (ns *Namespace) Bind(oldloc, newloc string, flags uint32) error {
 
 /* Returns a list of things pointing here and things here points at (if a mount/union).
  */
-func (ns *Namespace) LsMounts(path string) ([][]string, [][]string, error) {
-	parents := make([][]string, 0)
-	children := make([][]string, 0)
+func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
+	parents := make([]string, 0)
+	children := make([]string, 0)
 
 	e := ns.RootPath(path)
 	loc, err := ns.Extend(ns.Root, e.Elems)
@@ -202,15 +205,15 @@ func (ns *Namespace) LsMounts(path string) ([][]string, [][]string, error) {
 	}
 	for _, p := range loc.Parent {
 		if p.Etype == NSUNION {
-			parents = append(parents, p.Cname) // TODO: this only gives the name up to its NSMOUNT
+			parents = append(parents, strings.Join(p.Cname,"/")) // TODO: this only gives the name up to its NSMOUNT
 		}
 	}
 	switch loc.Etype {
 	case NSMOUNT:
-		children = append(children, loc.Cname) // TODO: give a string descr. of the client
+		children = append(children, strings.Join(loc.Cname,"/")) // TODO: give a string descr. of the client
 	case NSUNION:
 		for _, c := range loc.u {
-			children = append(children, c.Cname) // TODO: this only gives the name up to its NSMOUNT
+			children = append(children, strings.Join(c.Cname, "/")) // TODO: this only gives the name up to its NSMOUNT
 		}
 	}
 	return parents, children, nil
