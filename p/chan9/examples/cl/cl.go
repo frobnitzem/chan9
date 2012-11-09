@@ -423,7 +423,7 @@ func cmdumount(s []string) {
 		fmt.Fprintf(os.Stderr, "%s\n", helpstring("umount"))
 		return
 	}
-	err := ns.Unmount(s[0], s[1])
+	err := ns.Umount(s[0], s[1])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		return

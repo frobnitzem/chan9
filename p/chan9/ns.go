@@ -20,11 +20,16 @@ import (
 type Namespace struct {
 	sync.Mutex
 	Cwd        []string
-	Root       *NSElem // This one must be of type NSMOUNT, else there is no
+	Mnt	     *Mnttab
+	Root	     *Fid
+	WdFid        *Fid
+	//Root       *NSElem // This one must be of type NSMOUNT, else there is no
 			   //    server to accept 9p messages.
 	fidpool    *pool
 	err        error
 }
+
+var Enofile error = &p.Error{"file not found", p.ENOENT}
 
 /* Initializes a namespace object from a client.
  * It calls Mount to do the initial attachment,
@@ -35,18 +40,15 @@ func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, erro
 	//ns.User = c.User // p.OsUsers.Uid2User(os.Geteuid())
 	ns.fidpool = c.fidpool // newPool(p.NOFID)
 
-	ns.Root = new(NSElem)
-	ns.Root.Etype = NSPASS
-	ns.Root.Cname = make([]string, 0)
-	ns.Root.MayCreate = flags&p.MCREATE != 0
-	ns.Root.MayCache = flags&p.MCACHE != 0
-	ns.Root.Child = make(map[string]*NSElem)
-	ns.Root.c = nil
-	ns.Root.Parent = make([]*NSElem, 1)
-	ns.Root.Parent[0] = ns.Root
+	ns.Mnt = NewMnttab(c.Dev)
 	ns.Cwd = make([]string, 0)
 
 	err := ns.Mount(c, afd, "/", flags, aname)
+	if err != nil {
+		return nil, err
+	}
+	ns.Root = c.Root
+	ns.WdFid, err = ns.Walk(ns.Root, make([]string,0))
 	if err != nil {
 		return nil, err
 	}
@@ -64,13 +66,10 @@ func (ons *Namespace) clone() (*Namespace, error) {
 	ns.Root = ons.Root
 	ns.Cwd = make([]string, len(ons.Cwd))
 	copy(ns.Cwd, ons.Cwd)
-        ns.fidpool = newPool(p.NOFID) // FIXME -- don't drop existing fid-s
+        ns.fidpool = newPool(p.NOFID) // FIXME -- walk(0) all fids
 	ons.Unlock()
 
 	clnts.Lock() // FIXME -- manage clnts more effectively
-	for _,c := range clnts.c {
-		c.incref()
-	}
 	clnts.Unlock()
 
 	return ns, nil
@@ -91,7 +90,7 @@ type Fid struct {
 	Type uint16   // Channel type (index of function call table) -- FYI
 	Dev uint32    // Server or device number distinguishing the server from others of the same type
 			// duplicates Clnt * info
-	p.Qid         // The Qid description for the file
+	Qid p.Qid     // The Qid description for the file - direct inclusion conflicts, shadowing Type
 	Mode   uint8  // Open mode (one of p.O* values) (if file is open)
 	Fid    uint32 // Fid number
 	p.User        // The user the fid belongs to

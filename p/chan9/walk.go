@@ -40,7 +40,9 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 		} else {
 			qid = fid.Qid
 		}
-		newfid.Qid = qid // it should.
+		newfid.Clnt = fid.Clnt
+		newfid.Type = fid.Type
+		newfid.Qid = qid
 		newfid.Cname = PathJoin(fid.Cname, wnames)
 		newfid.walked = true
 	}
@@ -48,14 +50,16 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 	return rc.Wqid, nil
 }
 
-// Walks to a named file, using the same algo. as Walk, but always starting
-// from Clnt.Root. Returns a Fid associated with the file, or an Error.
-func (clnt *Clnt) FWalk(wnames []string) (*Fid, error) {
+/*  Wrapper for fid.Walk to deal with possibility of walking > 16 steps,
+    and of running into a mount-point along the way.
+ */
+func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 	var err error = nil
 	var wqid []p.Qid
+	var i int
+	var found bool
 
-	newfid := clnt.FidAlloc()
-	fid := clnt.Root
+	newfid := fid.Clnt.FidAlloc()
 
 	for { // step in blocks of 16 path elems
 		n := len(wnames)
@@ -67,12 +71,43 @@ func (clnt *Clnt) FWalk(wnames []string) (*Fid, error) {
 		if err != nil {
 			goto error
 		}
+		// Check for hitting mount-points and recurse.
+		for i = 0; i < len(wqid); i++ {
+			c := ns.Mnt.CheckMount(fid.Type, fid.Dev, wqid[i])
+			if c == nil {
+				continue
+			}
+			if i == len(wnames)-1 {
+				break
+			}
+			// Walk the next name, testing for errors to find correct union.
+			// TODO: move the following to 'WalkUnion'
+			// to call from partial walks, e.g. mkdir
+			found = false
+			for _, fs := range c {
+				wqid, err = fs.Walk(newfid, wnames[i+1:i+2])
+				if err != nil || len(wqid) != 1 {
+					continue
+				}
+				// Successful mount lookup.
+				wnames = wnames[i+1:] // since it gets bumped below.
+				i = 0
+				n = 1
+				found = true
+				break
+			}
+			if !found {
+				err = Enofile
+				goto error
+			}
+		}
+
 		if len(wqid) != n {
-			err = &p.Error{"file not found", p.ENOENT}
+			err = Enofile
 			goto error
 		}
 
-		wnames = wnames[n:len(wnames)]
+		wnames = wnames[n:]
 		fid = newfid
 		if len(wnames) == 0 {
 			break
@@ -86,6 +121,21 @@ error:
 	return nil, err
 }
 
+// Walks to a named file, using the same algo. as Walk, but always starting
+// from ns.Root. Returns a Fid associated with the file, or an Error.
+func (ns *Namespace) FWalk(e Elemlist) (*Fid, error) {
+	var fid *Fid
+	switch e.Ref {
+	case '/':
+		fid = ns.Root
+	case '.':
+		fid = ns.WdFid
+	default:
+		return nil, Enofile
+	}
+	return ns.Walk(fid, e.Elems)
+}
+
 // Starting from the file associated with fid, walks all wnames in
 // sequence and associates the resulting file with newfid. If no wnames
 // were walked successfully, an Error is returned. Otherwise a slice with a
@@ -93,15 +143,4 @@ error:
 //func (ns *Namespace) Walk(fid *Fid, newfid *Fid, wnames []string) ([]p.Qid, error) {
 //	return fid.Walk(newfid, wnames)
 //}
-func (ns *Namespace) FWalk(e Elemlist) (*Fid, error) {
-	var wnames []string = e.Elems
-	if e.Ref != '/' {
-		wnames = PathJoin(ns.Cwd, e.Elems)
-		//e.Elems = PathJoin(ns.Cwd, e.Elems)
-		//e.Ref = '/'
-	}
-	mh, mpath := mhead_split(ns.Root, wnames)
-
-	return mh.c.FWalk(mpath)
-}
 

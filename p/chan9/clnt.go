@@ -345,7 +345,7 @@ func NewClnt(c net.Conn, msize uint32, dotu bool) *Clnt {
 	clnt.Debuglevel = DefaultDebuglevel
 	clnt.Log = DefaultLogger
 
-	//clnt.Type = 0 -- we have no special types for now
+	clnt.Type = 0 //-- we have no special types for now
 	clnts.Lock()
 	clnt.Dev = clnts.nextdev
 	clnts.c[clnt.Dev] = clnt
@@ -398,7 +398,7 @@ func (clnt *Clnt) FidAlloc() *Fid {
 	fid.Fid = clnt.fidpool.getId()
 	fid.Clnt = clnt
 	fid.Dev = clnt.Dev
-	//fid.Type = clnt.Type
+	fid.Type = clnt.Type
 	fid.User = clnt.User
 	fid.Cname = make([]string, 0)
 

@@ -20,6 +20,7 @@ func (fid *Fid) Clunk() (err error) {
 	}
 
 	fid.Clnt.fidpool.putId(fid.Fid)
+	fid.Clnt.decref()
 	fid.walked = false
 	fid.Fid = p.NOFID
 	return

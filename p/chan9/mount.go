@@ -37,134 +37,23 @@ func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, an
 	clnt.Root = fid
 	clnt.fidpool = ns.fidpool
 
-	e := ns.RootPath(oldloc) // get the rooted path
-	loc, err := ns.Extend(ns.Root, e.Elems)
+	e := ParseName(oldloc)
+	parent, err := ns.FWalk(e) // walk to fid on parent side
 
 	if err != nil {
 		clnt.Root = oldroot
 		clnt.fidpool = oldfidpool
 		return err
 	}
-
-	l := NewNSElem(loc.Cname...)
-	l.Etype = NSMOUNT
-	l.c = clnt
-	clnt.incref()
-	l.MayCreate = flags&p.MCREATE != 0
-	l.MayCache = flags&p.MCACHE != 0
-	ns.replace(loc, l, flags)
-	return nil
-}
-
-func NewNSElem(Cname ...string) *NSElem {
-	l := new(NSElem)
-	l.Etype = NSPASS
-	l.Cname = Cname
-	l.Parent = make([]*NSElem, 0)
-	l.Child = make(map[string]*NSElem)
-	return l
-}
-
-/* Replace an NSElem with the info. from a new one.  The replacement
-   ensures that links point to the newly updated location.
- */
-func (ns *Namespace) replace(loc, e *NSElem, flags uint32) {
-	op := func() {
-		ns._replace(loc, e, flags)
-	}
-	ns.gc(op)
-}
-
-func (ns *Namespace) _replace(loc, e *NSElem, flags uint32) {
-	if flags&p.MORDER == p.MREPL { // don't need the client pointer in any case.
-		ns.unlink(loc)
-		loc.Etype = e.Etype
-		loc.c = e.c
-		loc.Cname = e.Cname
-		//loc.Parent = e.Parent // inherits parents
-		loc.Child = e.Child
-		loc.MayCreate = e.MayCreate
-		loc.MayCache = e.MayCache
-	} else { // dir becomes union
-		switch loc.Etype {
-		case NSPASS:
-			fallthrough
-		case NSMOUNT: // cast to union
-			nelem := ns.Birth(loc, "")
-			nelem.Etype = loc.Etype
-			nelem.c = loc.c
-			loc.Etype = NSUNION
-			loc.c = nil
-			loc.u = make([]*NSElem, 2)[:1]
-			loc.u[0] = e
-			fallthrough
-		case NSUNION:
-			// check if clnt is already in loc.u ?
-			switch flags&p.MORDER {
-			case p.MAFTER:
-				loc.u = append(loc.u, e)
-			case p.MBEFORE:
-				l := len(loc.u)
-				if cap(loc.u) < l+1 {
-					loc.u = make([]*NSElem, l+3)[:l+1]
-				} else {
-					loc.u = loc.u[:l+1]
-				}
-				copy(loc.u[1:l+1], loc.u[:l])
-				loc.u[0] = e
-			}
-		}
-	}
-
-	return
-}
-
-/* Extends the namespace by adding NSElems where they don't exist,
-   verifying at each step that the path exists.  If it doesn't,
-   the ns is cleaned up to match, and an error is returned.
-   It breaks up the task by recursion.
- */
-func (ns *Namespace) Extend(mhead *NSElem, dirs []string) (end *NSElem, err error) {
-	var i int
-	loc := mhead
-	next := loc
-
-	if len(dirs) == 0 { // corner case, important for bootstrapping
-		return mhead, nil
-	}
-	for i = 0; i < len(dirs); i++ {
-		next = loc.Lookup(dirs[i])
-		if next == nil || next.Etype != NSPASS {
-			break
-		}
-		loc = next
-	}
-
-	// Trust, but verify.
-	newfid := mhead.c.FidAlloc()
-	dpath := PathJoin(mhead.Cname, dirs[:i])
-	qids, err := mhead.c.Root.Walk(newfid, dpath)
+	err = ns.Mnt.Mount(fid, clnt.Root, flags)
 	if err != nil {
-		return nil, err
-	}
-	newfid.Clunk()
-	if j := len(dpath)-len(qids); j != 0 {
-		if j == 1 { // found nselem, but couldn't walk it
-			ns.remove(next)
-			return nil, &p.Error{"Remote dir removed", p.ENOENT}
-		} else {
-			return ns.Extend(next, dirs[:i+1-j])
-		}
+		clnt.Root = oldroot
+		clnt.fidpool = oldfidpool
+		parent.Clunk()
+		return err
 	}
 
-	if i == len(dirs) {
-		return loc, nil
-	}
-	next = loc
-	for _,dir := range dirs[i:] {
-		loc = ns.Birth(loc, dir)
-	}
-	return ns.Extend(next, dirs[i:])
+	return nil
 }
 
 // Mount's cousin (to, from), since we re-direct "from (=newloc)" to "to (=oldloc)".
@@ -173,23 +62,22 @@ func (ns *Namespace) Bind(oldloc, newloc string, flags uint32) error {
 	if flags > p.MMASK-1 {
 		return &p.Error{"bad bind flags", p.EINVAL}
 	}
-	op := ns.RootPath(oldloc)
-	np := ns.RootPath(newloc)
+	ppath := ParseName(newloc)
+	cpath := ParseName(oldloc)
 	// walk both locations
-	ons, err := ns.Extend(ns.Root, op.Elems)
+	parent, err := ns.FWalk(ppath)
 	if err != nil {
 		return err
 	}
-	nns, err := ns.Extend(ns.Root, np.Elems)
+	child, err := ns.FWalk(cpath)
 	if err != nil {
 		return err
 	}
 	
-	ons.MayCreate = flags&p.MCREATE != 0 // FIXME: must deal with these attrs differently
-	ons.MayCache = flags&p.MCACHE != 0
-	ns.replace(nns, ons, flags)
+	//child.MayCreate = flags&p.MCREATE != 0 // FIXME: add MCREATE/MCACHE attrs to mounts.
+	//child.MayCache = flags&p.MCACHE != 0
 	
-	return nil
+	return ns.Mnt.Mount(parent, child, flags)
 }
 
 /* Returns a list of things pointing here and things here points at (if a mount/union).
@@ -198,50 +86,35 @@ func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
 	parents := make([]string, 0)
 	children := make([]string, 0)
 
-	e := ns.RootPath(path)
-	loc, err := ns.Extend(ns.Root, e.Elems)
+	e := ParseName(path)
+	fid, err := ns.FWalk(e)
 	if err != nil {
-		return nil, nil, err
+		return parents, children, err
 	}
-	for _, p := range loc.Parent {
-		if p.Etype == NSUNION {
-			parents = append(parents, strings.Join(p.Cname,"/")) // TODO: this only gives the name up to its NSMOUNT
-		}
+	for _, p := range ns.Mnt.Mounted(fid.Type, fid.Dev, fid.Qid) {
+		parents = append(parents, strings.Join(p.Cname,"/")) // TODO: this only gives the name up to its NSMOUNT
 	}
-	switch loc.Etype {
-	case NSMOUNT:
-		children = append(children, strings.Join(loc.Cname,"/")) // TODO: give a string descr. of the client
-	case NSUNION:
-		for _, c := range loc.u {
-			children = append(children, strings.Join(c.Cname, "/")) // TODO: this only gives the name up to its NSMOUNT
-		}
+	for _, c := range ns.Mnt.CheckMount(fid.Type, fid.Dev, fid.Qid) {
+		children = append(children, strings.Join(c.Cname, "/")) // TODO: this only gives the name up to its NSMOUNT
 	}
 	return parents, children, nil
 }
 
-func (ns *Namespace) Unmount(oldloc, newloc string) error {
+func (ns *Namespace) Umount(oldloc, newloc string) error {
 	//var oper func()
 
-	op := ns.RootPath(oldloc)
-	np := ns.RootPath(newloc)
+	ppath := ParseName(newloc)
+	cpath := ParseName(oldloc)
 	// walk both locations
-	ons, err := ns.Extend(ns.Root, op.Elems)
+	parent, err := ns.FWalk(ppath)
 	if err != nil {
 		return err
 	}
-	nns, err := ns.Extend(ns.Root, np.Elems)
+	child, err := ns.FWalk(cpath)
 	if err != nil {
 		return err
 	}
 	
-	switch nns.Etype { // TODO
-	case NSMOUNT:
-	case NSUNION:
-	default:
-		return &p.Error{"invalid mount point", p.ENOENT}
-	}
-	ons.Etype = ons.Etype
-	
-	return nil
+	return ns.Mnt.Umount(parent, child)
 }
 
