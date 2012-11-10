@@ -18,6 +18,9 @@ import (
 // wnames must also be less than MAXWELEM=16 for most servers,
 // but this call is staying close to the network call and doesn't deal with that.
 func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
+	if fid == nil {
+		return nil, Ebaduse
+	}
 	tc := fid.Clnt.NewFcall()
 
 	err := p.PackTwalk(tc, fid.Fid, newfid.Fid, wnames)
@@ -57,8 +60,10 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 	var err error = nil
 	var wqid []p.Qid
 	var i int
-	var found bool
 
+	if fid == nil {
+		return nil, err
+	}
 	newfid := fid.Clnt.FidAlloc()
 
 	for { // step in blocks of 16 path elems
@@ -68,38 +73,36 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 		}
 
 		wqid, err = fid.Walk(newfid, wnames[0:n])
-		if err != nil {
+		if err != nil || (n > 0 && len(wqid) == 0) {
+			if fid.next != nil { // Unionized.
+				newfid.Clunk()
+				fid = fid.next
+				newfid = fid.Clnt.FidAlloc()
+				continue
+			}
 			goto error
 		}
 		// Check for hitting mount-points and recurse.
 		for i = 0; i < len(wqid); i++ {
+			// ¿TODO?: move the following to 'WalkUnion'
+			// and protect against changing Children[wqid[i]]
+			// to call from partial walks, e.g. mkdir
+			// - replace unions with a channel to manage state?
+			// - replace fid with an int to prevent fid tampering?
 			c := ns.Mnt.CheckMount(fid.Type, fid.Dev, wqid[i])
 			if c == nil {
+				// TODO: Check for symlinks and dial 'em!
 				continue
 			}
-			if i == len(wnames)-1 {
-				break
-			}
-			// Walk the next name, testing for errors to find correct union.
-			// TODO: move the following to 'WalkUnion'
-			// to call from partial walks, e.g. mkdir
-			found = false
-			for _, fs := range c {
-				wqid, err = fs.Walk(newfid, wnames[i+1:i+2])
-				if err != nil || len(wqid) != 1 {
-					continue
-				}
-				// Successful mount lookup.
-				wnames = wnames[i+1:] // since it gets bumped below.
-				i = 0
-				n = 1
-				found = true
-				break
-			}
-			if !found {
-				err = Enofile
-				goto error
-			}
+			newfid.Clunk() // the fid churn is to satisfy incref/decref
+			fid = c
+			newfid = fid.Clnt.FidAlloc()
+			break
+		}
+		if i < len(wqid) { // replaced by a mount point
+			n = i+1
+			wnames = wnames[n:]
+			continue // ensures we clone the client fid.
 		}
 
 		if len(wqid) != n {

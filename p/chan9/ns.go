@@ -30,30 +30,41 @@ type Namespace struct {
 }
 
 var Enofile error = &p.Error{"file not found", p.ENOENT}
+var Ebaduse error = &p.Error{"bad use of fid", p.EINVAL}
 
 /* Initializes a namespace object from a client.
  * It calls Mount to do the initial attachment,
  * which respects Clnt.Subpath.
  */
 func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, error) {
-	ns := new(Namespace)
-	//ns.User = c.User // p.OsUsers.Uid2User(os.Geteuid())
-	ns.fidpool = c.fidpool // newPool(p.NOFID)
-
-	ns.Mnt = NewMnttab(c.Dev)
-	ns.Cwd = make([]string, 0)
-
-	err := ns.Mount(c, afd, "/", flags, aname)
+	fid, err := c.Attach(afd, c.User, aname)
 	if err != nil {
 		return nil, err
 	}
-	ns.Root = c.Root
+
+	ns := new(Namespace)
+	//ns.User = c.User // p.OsUsers.Uid2User(os.Geteuid())
+	ns.fidpool = c.fidpool // newPool(p.NOFID)
+	ns.Mnt = NewMnttab(c.Dev) // Puts Dev in the Mnttab,
+	ns.Root = fid // so it doesn't flip when we mount.
 	ns.WdFid, err = ns.Walk(ns.Root, make([]string,0))
 	if err != nil {
 		return nil, err
 	}
+	ns.Cwd = make([]string, 0)
 
 	return ns, nil
+}
+
+func (ns *Namespace) Cd(dir string) error {
+	e := ParseName(dir)
+	fid, err := ns.FWalk(e)
+	if err != nil {
+		return err
+	}
+	ns.WdFid.Clunk()
+	ns.WdFid = fid
+	return nil
 }
 
 /* Clone a namespace object, uses copy-on-write semantics.
@@ -95,6 +106,11 @@ type Fid struct {
 	Fid    uint32 // Fid number
 	p.User        // The user the fid belongs to
 	walked bool   // true if the fid points to a walked file on the server
+	// options for representing union dir-s
+	prev   *Fid
+	next   *Fid
+	MayCreate bool
+	MayCache  bool
 }
 
 // The file is similar to the Fid, but is used in the high-level client

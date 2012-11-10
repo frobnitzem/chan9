@@ -77,6 +77,7 @@ func Dial(addr string) (*Clnt, error) {
 	if err != nil {
 		return nil, err
 	}
+	clnt.Id = addr
 
 	return clnt, nil
 }

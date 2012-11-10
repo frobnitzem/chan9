@@ -7,13 +7,16 @@ import (
 
 
 // The real mount command.
-// -- see http://plan9.bell-labs.com/sys/doc/lexnames.html (but note Cnames are here
-//                      as immutable path-names rooted (=[]) at the nearest mount point)
+// -- see http://plan9.bell-labs.com/sys/doc/lexnames.html (but note Cnames are
+//                      implemented as Qid lists, since names would)
 //    and http://man.cat-v.org/inferno/2/sys-bind
-//    The client should start with ref=1.
-//    This routine takes over management of the Client (unless it returns with error)
+//    The call to Attach creates a fid and runs Clnt.incref(), which will be destroyed
+//    if the ns.Root is ever clunk()-ed
 //    so call Clnt.incref() if you need to keep it.
 func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, aname string) error {
+	var e Elemlist
+	var parent *Fid
+
 	if flags > p.MMASK-1 {
 		return &p.Error{"bad mount flags", p.EINVAL}
 	}
@@ -23,47 +26,54 @@ func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, an
 	}
 	// walk the client to reach clnt.Subpath
 	if len(clnt.Subpath) > 0 {
-		Qids, err := fid.Walk(fid, clnt.Subpath)
+		var Qids []p.Qid
+		Qids, err = fid.Walk(fid, clnt.Subpath)
 		if err != nil {
-			return err
+			goto err
 		}
 		if len(Qids) != len(clnt.Subpath) {
-			return &p.Error{"subpath not found on client", p.ENOENT}
+			err = &p.Error{"subpath not found on client", p.ENOENT}
+			goto err
 		}
 	}
 
-	oldroot := clnt.Root
-	oldfidpool := clnt.fidpool
-	clnt.Root = fid
+	e = ParseName(oldloc)
+	parent, err = ns.FWalk(e) // walk to fid on parent side
+
+	if err != nil {
+		goto err
+	}
+	if cap(fid.Cname) < 1+len(clnt.Subpath) {
+		fid.Cname = make([]string, 1+len(clnt.Subpath))
+	} else {
+		fid.Cname = fid.Cname[:1+len(clnt.Subpath)]
+	}
+	fid.Cname[0] = clnt.Id+":"
+	copy(fid.Cname[1:], clnt.Subpath)
+	err = ns.Mnt.Mount(fid, parent, flags)
+	if err != nil {
+		parent.Clunk()
+		goto err
+	}
 	clnt.fidpool = ns.fidpool
 
-	e := ParseName(oldloc)
-	parent, err := ns.FWalk(e) // walk to fid on parent side
-
-	if err != nil {
-		clnt.Root = oldroot
-		clnt.fidpool = oldfidpool
-		return err
-	}
-	err = ns.Mnt.Mount(fid, clnt.Root, flags)
-	if err != nil {
-		clnt.Root = oldroot
-		clnt.fidpool = oldfidpool
-		parent.Clunk()
-		return err
-	}
-
 	return nil
+err:
+	fid.Clunk()
+	return err
 }
 
 // Mount's cousin (to, from), since we re-direct "from (=newloc)" to "to (=oldloc)".
-// Note, however, that the arguments are in the opposite order compared to ln -s.
-func (ns *Namespace) Bind(oldloc, newloc string, flags uint32) error {
+// Note that the arguments are in the SAME order compared to ln -s and mount.
+// parent -> child is read as 'the parent references the child'
+// even though the child (e.g. /dev/...) is usually thought of as pre-existing,
+// the parent -> child idea is more fitting for the filesystem hierarchy.
+func (ns *Namespace) Bind(cname, pname string, flags uint32) error {
 	if flags > p.MMASK-1 {
 		return &p.Error{"bad bind flags", p.EINVAL}
 	}
-	ppath := ParseName(newloc)
-	cpath := ParseName(oldloc)
+	ppath := ParseName(pname)
+	cpath := ParseName(cname)
 	// walk both locations
 	parent, err := ns.FWalk(ppath)
 	if err != nil {
@@ -74,13 +84,13 @@ func (ns *Namespace) Bind(oldloc, newloc string, flags uint32) error {
 		return err
 	}
 	
-	//child.MayCreate = flags&p.MCREATE != 0 // FIXME: add MCREATE/MCACHE attrs to mounts.
-	//child.MayCache = flags&p.MCACHE != 0
-	
-	return ns.Mnt.Mount(parent, child, flags)
+	return ns.Mnt.Mount(child, parent, flags)
 }
 
 /* Returns a list of things pointing here and things here points at (if a mount/union).
+ * TODO: This routine gives crazy answers because walking to the given string
+ * causes substitution of parents -> children, so parents are always returned...
+ * We need a walk-before + partial walk mechanism.
  */
 func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
 	parents := make([]string, 0)
@@ -92,29 +102,35 @@ func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
 		return parents, children, err
 	}
 	for _, p := range ns.Mnt.Mounted(fid.Type, fid.Dev, fid.Qid) {
-		parents = append(parents, strings.Join(p.Cname,"/")) // TODO: this only gives the name up to its NSMOUNT
+		parents = append(parents, strings.Join(p.Cname,"/"))
 	}
-	for _, c := range ns.Mnt.CheckMount(fid.Type, fid.Dev, fid.Qid) {
-		children = append(children, strings.Join(c.Cname, "/")) // TODO: this only gives the name up to its NSMOUNT
+	for c := ns.Mnt.CheckMount(fid.Type, fid.Dev, fid.Qid); c != nil; c=c.next {
+		children = append(children, strings.Join(c.Cname, "/"))
 	}
 	return parents, children, nil
 }
 
-func (ns *Namespace) Umount(oldloc, newloc string) error {
+/* TODO: This routine never finds a mount because it's already substituted parents -> children.
+ */
+func (ns *Namespace) Umount(cname, pname string) error {
 	//var oper func()
+	var child *Fid
 
-	ppath := ParseName(newloc)
-	cpath := ParseName(oldloc)
+	ppath := ParseName(pname)
+	cpath := ParseName(cname)
 	// walk both locations
 	parent, err := ns.FWalk(ppath)
 	if err != nil {
 		return err
 	}
-	child, err := ns.FWalk(cpath)
+
+	//if cpath != "" { // leave as nil to unmount all from parent
+	child, err = ns.FWalk(cpath)
 	if err != nil {
 		return err
 	}
+	//}
 	
-	return ns.Mnt.Umount(parent, child)
+	return ns.Mnt.Umount(child, parent)
 }
 

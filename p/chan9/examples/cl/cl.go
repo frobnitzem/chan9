@@ -113,7 +113,7 @@ func statone(fname chan9.Elemlist) {
 		fmt.Fprintf(os.Stderr, "error in stat %s: %v\n", fname.String(), oserr)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "%s\n", stat)
+	fmt.Fprintf(os.Stdout, "%#v\n", stat)
 }
 
 func cmdstat(s []string) {
@@ -187,7 +187,7 @@ func walkone(e chan9.Elemlist) {
 	}
 	defer fid.Clunk()
 
-	if e.Mustbedir && (fid.Type&p.QTDIR == 0) {
+	if e.Mustbedir && (fid.Qid.Type&p.QTDIR == 0) {
 		fmt.Fprintf(os.Stderr, "can't cd to file [%s]\n", e.String())
 		return
 	}
@@ -374,7 +374,7 @@ func cmdmount(s []string) {
 		fmt.Fprintf(os.Stderr, "Error opening connection to %s: %s\n", s[0], err)
 		return
 	}
-	err = ns.Mount(c, nil, s[1], p.MBEFORE, "")
+	err = ns.Mount(c, nil, s[1], p.MBEFORE|p.MCREATE, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error mounting connection to %s: %s\n", s[0], err)
 		c.Clunk(err)
@@ -397,6 +397,11 @@ func cmdbind(s []string) {
 
 // List the mounts from/to the given dir.
 func cmdlsmount(s []string) {
+	if len(s) == 0 {
+		ns.Mnt.PrintMnttab()
+		return
+	}
+
 	if len(s) != 1 {
 		fmt.Fprintf(os.Stderr, "%s\n", helpstring("lsmount"))
 		return

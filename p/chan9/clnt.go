@@ -51,7 +51,7 @@ type Clnt struct {
                         // the Type field, it could be informative.
         Dev uint32 // Device number for this channel
 	Subpath    []string // "root" to begin requests from the channel
-	Root       *Fid   // Fid that points to subpath on the server
+	//Root       *Fid   // Fid that points to subpath on the server - managed by mount and ns
 	Debuglevel int    // Copied from ns
 	Id         string // Info. about attached server,
 			  // used when printing debug messages
@@ -401,6 +401,7 @@ func (clnt *Clnt) FidAlloc() *Fid {
 	fid.Type = clnt.Type
 	fid.User = clnt.User
 	fid.Cname = make([]string, 0)
+	clnt.incref()
 
 	return fid
 }
