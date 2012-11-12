@@ -318,10 +318,9 @@ func (req *Req) Process() {
 		}
 	}
 
+	/* Message types which allow NOFID
+	 */
 	switch req.Tc.Type {
-	default:
-		req.RespondError(&p.Error{"unknown message type", p.ENOSYS})
-
 	case p.Tversion:
 		srv.version(req)
 
@@ -334,32 +333,45 @@ func (req *Req) Process() {
 	case p.Tflush:
 		srv.flush(req)
 
-	case p.Twalk:
-		srv.walk(req)
+	default:
+		/* Message types requiring a valid Fid:
+		 */
+		if req.Fid == nil {
+			req.RespondError(Eunknownfid)
+			return
+		}
+		
+		switch req.Tc.Type {
+		default:
+			req.RespondError(&p.Error{"unknown message type", p.ENOSYS})
 
-	case p.Topen:
-		srv.open(req)
+		case p.Twalk:
+			srv.walk(req)
 
-	case p.Tcreate:
-		srv.create(req)
+		case p.Topen:
+			srv.open(req)
 
-	case p.Tread:
-		srv.read(req)
+		case p.Tcreate:
+			srv.create(req)
 
-	case p.Twrite:
-		srv.write(req)
+		case p.Tread:
+			srv.read(req)
 
-	case p.Tclunk:
-		srv.clunk(req)
+		case p.Twrite:
+			srv.write(req)
 
-	case p.Tremove:
-		srv.remove(req)
+		case p.Tclunk:
+			srv.clunk(req)
 
-	case p.Tstat:
-		srv.stat(req)
+		case p.Tremove:
+			srv.remove(req)
 
-	case p.Twstat:
-		srv.wstat(req)
+		case p.Tstat:
+			srv.stat(req)
+
+		case p.Twstat:
+			srv.wstat(req)
+		}
 	}
 }
 
