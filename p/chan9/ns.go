@@ -91,6 +91,8 @@ func (ns *Namespace) Close() {
 	return
 }
 
+const NOREMAP uint16 = 1<<15
+
 // A Fid type represents a file on the server. Fids are used for the
 // low level methods that correspond directly to the 9P2000 message requests
 type Fid struct {
@@ -99,6 +101,7 @@ type Fid struct {
 	Cname	[]string
 	Iounit uint32
 	Type uint16   // Channel type (index of function call table) -- FYI
+			// left-most bit indicates 'non-remappable' type/dev pair
 	Dev uint32    // Server or device number distinguishing the server from others of the same type
 			// duplicates Clnt * info
 	Qid p.Qid     // The Qid description for the file - direct inclusion conflicts, shadowing Type

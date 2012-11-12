@@ -92,6 +92,6 @@ func (p *pool) putId(id uint32) {
 		return
 	}
 
-	p.imap[id/8] &= ^(1 << (id % 8))
+	p.imap[id/8] &= ^(1 << (id % 8)) // FIXME: error check this so that close(invalid) doesn't crash?
 	p.Unlock()
 }

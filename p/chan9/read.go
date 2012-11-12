@@ -98,6 +98,23 @@ func (file *File) Readdir(num int) ([]*p.Dir, error) {
 		}
 
 		if n == 0 {
+			if file.Fid.next != nil {
+				file.Fid, err = file.Fid.MStep()
+				if err != nil {
+					return nil, err
+				}
+				file.Offset = 0
+				err := file.Fid.Open(p.OREAD)
+				if err != nil {
+					return nil, err
+				}
+				if cap(buf) < int(file.Fid.Clnt.Msize-p.IOHDRSZ) {
+					buf = make([]byte, file.Fid.Clnt.Msize-p.IOHDRSZ)
+				} else {
+					buf = buf[:file.Fid.Clnt.Msize-p.IOHDRSZ]
+				}
+				continue
+			}
 			break
 		}
 

@@ -6,6 +6,7 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
+	"fmt"
 	"syscall"
 )
 
@@ -23,6 +24,13 @@ func (fid *Fid) Open(mode uint8) error {
 		return err
 	}
 	if rc.Type == p.Rerror {
+		if fid.next != nil {
+			nf, err := fid.MStep()
+			if err != nil {
+				return err
+			}
+			return nf.Open(mode)
+		}
 		return &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
 	}
 
@@ -38,6 +46,18 @@ func (fid *Fid) Open(mode uint8) error {
 // Creates a file in the directory associated with the fid. Returns nil
 // if the operation is successful.
 func (fid *Fid) Create(name string, perm uint32, mode uint8, ext string) error {
+	if fid.prev != nil || fid.next != nil { // union
+		if !fid.MayCreate {
+			if fid.next == nil {
+				return &p.Error{"No writable directory in union", p.ENOENT}
+			}
+			nf, err := fid.MStep()
+			if err != nil {
+				return err
+			}
+			return nf.Create(name, perm, mode, ext)
+		}
+	}
 	tc := fid.Clnt.NewFcall()
 	err := p.PackTcreate(tc, fid.Fid, name, perm, mode, ext, fid.Clnt.Dotu)
 	if err != nil {
@@ -100,6 +120,7 @@ func (ns *Namespace) FOpen(path Elemlist, mode uint8) (*File, error) {
 		fid.Clunk()
 		return nil, err
 	}
+	fmt.Printf("Opened %v, next = %v\n", fid.ID(), fid.next)
 
 	return &File{fid, 0}, nil
 }

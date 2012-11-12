@@ -34,7 +34,10 @@ func (ns *Namespace) FRemove(path Elemlist) error {
 	if err != nil {
 		return err
 	}
+	// TODO: check for open mounts and return an error.
+	// ns.Mnt.remove(fid)
 
 	err = fid.Remove()
+	fid.Clnt.decref()
 	return err
 }

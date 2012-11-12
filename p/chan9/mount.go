@@ -2,6 +2,7 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
+	"fmt"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, an
 	}
 
 	e = ParseName(oldloc)
-	parent, err = ns.FWalk(e) // walk to fid on parent side
+	parent, err = ns.FWalkTo(e) // walk to fid on parent side
 
 	if err != nil {
 		goto err
@@ -63,7 +64,7 @@ err:
 	return err
 }
 
-// Mount's cousin (to, from), since we re-direct "from (=newloc)" to "to (=oldloc)".
+// Mount's cousin (to, from), since we re-direct "from" to "to".
 // Note that the arguments are in the SAME order compared to ln -s and mount.
 // parent -> child is read as 'the parent references the child'
 // even though the child (e.g. /dev/...) is usually thought of as pre-existing,
@@ -75,42 +76,50 @@ func (ns *Namespace) Bind(cname, pname string, flags uint32) error {
 	ppath := ParseName(pname)
 	cpath := ParseName(cname)
 	// walk both locations
-	parent, err := ns.FWalk(ppath)
+	parent, err := ns.FWalkTo(ppath)
 	if err != nil {
 		return err
 	}
-	child, err := ns.FWalk(cpath)
+	child, err := ns.FWalkTo(cpath)
 	if err != nil {
 		return err
+	}
+	// Handle special case of chroot-ing
+	if flags&p.MORDER == p.MREPL && parent.ID() == ns.Root.ID() {
+		ns.Mnt.Root = child.Dev
+		ns.Root.Clunk()
+		parent.Clunk()
+		ns.Root = child
+		ns.Mnt.GC()
+		return nil
 	}
 	
 	return ns.Mnt.Mount(child, parent, flags)
 }
 
 /* Returns a list of things pointing here and things here points at (if a mount/union).
- * TODO: This routine gives crazy answers because walking to the given string
- * causes substitution of parents -> children, so parents are always returned...
- * We need a walk-before + partial walk mechanism.
  */
 func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
 	parents := make([]string, 0)
 	children := make([]string, 0)
 
 	e := ParseName(path)
-	fid, err := ns.FWalk(e)
+	fid, err := ns.FWalkTo(e)
 	if err != nil {
 		return parents, children, err
 	}
 	for _, p := range ns.Mnt.Mounted(fid.Type, fid.Dev, fid.Qid) {
-		parents = append(parents, strings.Join(p.Cname,"/"))
+		parents = append(parents, fmt.Sprintf("%#v", p))
 	}
 	for c := ns.Mnt.CheckMount(fid.Type, fid.Dev, fid.Qid); c != nil; c=c.next {
 		children = append(children, strings.Join(c.Cname, "/"))
 	}
+	fid.Clunk()
 	return parents, children, nil
 }
 
-/* TODO: This routine never finds a mount because it's already substituted parents -> children.
+/* TODO: Provide an unmount that works with strings -> find network names.
+ *       or to unmount all.
  */
 func (ns *Namespace) Umount(cname, pname string) error {
 	//var oper func()
@@ -119,13 +128,13 @@ func (ns *Namespace) Umount(cname, pname string) error {
 	ppath := ParseName(pname)
 	cpath := ParseName(cname)
 	// walk both locations
-	parent, err := ns.FWalk(ppath)
+	parent, err := ns.FWalkTo(ppath)
 	if err != nil {
 		return err
 	}
 
-	//if cpath != "" { // leave as nil to unmount all from parent
-	child, err = ns.FWalk(cpath)
+	//if cpath != "" { // specify umount all?
+	child, err = ns.FWalkTo(cpath)
 	if err != nil {
 		return err
 	}

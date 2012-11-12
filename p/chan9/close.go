@@ -28,6 +28,6 @@ func (fid *Fid) Clunk() (err error) {
 
 // Closes a file. Returns nil if successful.
 func (file *File) Close() error {
-	// Should we cancel all pending requests for the File
+	// Should we cancel all pending requests for the File?
 	return file.Fid.Clunk()
 }
