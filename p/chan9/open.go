@@ -6,7 +6,6 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"fmt"
 	"syscall"
 )
 
@@ -29,7 +28,8 @@ func (fid *Fid) Open(mode uint8) error {
 			if err != nil {
 				return err
 			}
-			return nf.Open(mode)
+			*fid = *nf
+			return fid.Open(mode)
 		}
 		return &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
 	}
@@ -55,7 +55,8 @@ func (fid *Fid) Create(name string, perm uint32, mode uint8, ext string) error {
 			if err != nil {
 				return err
 			}
-			return nf.Create(name, perm, mode, ext)
+			*fid = *nf
+			return fid.Create(name, perm, mode, ext)
 		}
 	}
 	tc := fid.Clnt.NewFcall()
@@ -120,7 +121,6 @@ func (ns *Namespace) FOpen(path Elemlist, mode uint8) (*File, error) {
 		fid.Clunk()
 		return nil, err
 	}
-	fmt.Printf("Opened %v, next = %v\n", fid.ID(), fid.next)
 
 	return &File{fid, 0}, nil
 }

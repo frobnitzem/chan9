@@ -32,6 +32,7 @@ func PathJoin(from, add []string) []string {
 	return out
 }
 
+/*
 func (ns *Namespace) RootPath(path string) Elemlist {
 	e := ParseName(path)
         switch e.Ref {
@@ -43,7 +44,7 @@ func (ns *Namespace) RootPath(path string) Elemlist {
                 return e
 	} //default: // TODO -- implement # names
         return e
-}
+}*/
 
 /*
  * Create sub-slices of the names, breaking on '/'.

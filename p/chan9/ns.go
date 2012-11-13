@@ -19,10 +19,10 @@ import (
 // of the mounted p9 clients and the user's fid-s.
 type Namespace struct {
 	sync.Mutex
-	Cwd        []string
+	//Cwd        []string
 	Mnt	     *Mnttab
 	Root	     *Fid
-	WdFid        *Fid
+	Cwd        *Fid
 	//Root       *NSElem // This one must be of type NSMOUNT, else there is no
 			   //    server to accept 9p messages.
 	fidpool    *pool
@@ -47,11 +47,10 @@ func NSFromClnt(c *Clnt, afd *Fid, flags uint32, aname string) (*Namespace, erro
 	ns.fidpool = c.fidpool // newPool(p.NOFID)
 	ns.Mnt = NewMnttab(c.Dev) // Puts Dev in the Mnttab,
 	ns.Root = fid // so it doesn't flip when we mount.
-	ns.WdFid, err = ns.Walk(ns.Root, make([]string,0))
+	ns.Cwd, err = ns.Walk(ns.Root, make([]string,0))
 	if err != nil {
 		return nil, err
 	}
-	ns.Cwd = make([]string, 0)
 
 	return ns, nil
 }
@@ -62,8 +61,8 @@ func (ns *Namespace) Cd(dir string) error {
 	if err != nil {
 		return err
 	}
-	ns.WdFid.Clunk()
-	ns.WdFid = fid
+	ns.Cwd.Clunk()
+	ns.Cwd = fid
 	return nil
 }
 
@@ -75,8 +74,8 @@ func (ons *Namespace) clone() (*Namespace, error) {
 
 	ons.Lock()
 	ns.Root = ons.Root
-	ns.Cwd = make([]string, len(ons.Cwd))
-	copy(ns.Cwd, ons.Cwd)
+	//ns.Cwd = make([]string, len(ons.Cwd))
+	//copy(ns.Cwd, ons.Cwd)
         ns.fidpool = newPool(p.NOFID) // FIXME -- walk(0) all fids
 	ons.Unlock()
 
@@ -91,7 +90,7 @@ func (ns *Namespace) Close() {
 	return
 }
 
-const NOREMAP uint16 = 1<<15
+const NOREMAP uint16 = 1<<15 // or-ed into Type field to ensure it's not the parent of a mnt
 
 // A Fid type represents a file on the server. Fids are used for the
 // low level methods that correspond directly to the 9P2000 message requests

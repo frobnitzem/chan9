@@ -4,6 +4,10 @@
 
 package chan9
 
+import "code.google.com/p/go9p/p"
+import "fmt"
+import "os"
+
 var m2id = [...]uint8{
 	0, 1, 0, 2, 0, 1, 0, 3,
 	0, 1, 0, 2, 0, 1, 0, 4,
@@ -83,15 +87,19 @@ func (p *pool) getId() uint32 {
 	return ret
 }
 
-func (p *pool) putId(id uint32) {
-	p.Lock()
-	if p.need > 0 {
-		p.nchan <- id
-		p.need--
-		p.Unlock()
+func (pl *pool) putId(id uint32) {
+	if id == p.NOFID {
+		fmt.Fprintf(os.Stderr, "Error! Tried to free unopened file.\n")
+		return
+	}
+	pl.Lock()
+	if pl.need > 0 {
+		pl.nchan <- id
+		pl.need--
+		pl.Unlock()
 		return
 	}
 
-	p.imap[id/8] &= ^(1 << (id % 8)) // FIXME: error check this so that close(invalid) doesn't crash?
-	p.Unlock()
+	pl.imap[id/8] &= ^(1 << (id % 8)) // FIXME: error check this so that close(invalid) doesn't crash?
+	pl.Unlock()
 }

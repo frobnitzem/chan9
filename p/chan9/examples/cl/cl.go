@@ -72,6 +72,8 @@ func modetostr(mode uint32) string {
 func writeone(fname chan9.Elemlist, s string) {
 	file, oserr := ns.FCreate(fname, 0666, p.OWRITE)
 	if oserr != nil {
+		fmt.Printf("error creating %s: %v\n", fname.String(), oserr)
+		fmt.Printf("trying open...\n")
 		file, oserr = ns.FOpen(fname, p.OWRITE|p.OTRUNC)
 		if oserr != nil {
 			fmt.Fprintf(os.Stderr, "error opening %s: %v\n", fname.String(), oserr)
@@ -167,9 +169,7 @@ func cmdls(s []string) {
 		s = s[1:]
 	}
 	if len(s) == 0 {
-		var cwd chan9.Elemlist
-		cwd.Ref = '/'
-		cwd.Elems = ns.Cwd
+		var cwd = chan9.Elemlist {Ref:'.', Elems:make([]string, 0)}
 		lsone(cwd, long)
 	} else {
 		for _, d := range s {
@@ -178,30 +178,14 @@ func cmdls(s []string) {
 	}
 }
 
-func walkone(e chan9.Elemlist) {
-	fid, err := ns.FWalk(e)
-
-	if err != nil { // FWalk clunk-s the newfid for us.
-		fmt.Fprintf(os.Stderr, "walk error: %s\n", err)
-		return
-	}
-	defer fid.Clunk()
-
-	if e.Mustbedir && (fid.Qid.Type&p.QTDIR == 0) {
-		fmt.Fprintf(os.Stderr, "can't cd to file [%s]\n", e.String())
-		return
-	}
-
-	ns.Cwd = fid.Cname
-}
-
 func cmdcd(s []string) {
 	if s == nil || len(s) < 1 {
 		return
 	}
-	p := chan9.ParseName(s[0])
-	p.Mustbedir = true
-	walkone(p)
+	err := ns.Cd(s[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cd error: %s\n", err)
+	}
 }
 
 // Print the contents of f
@@ -435,7 +419,7 @@ func cmdumount(s []string) {
 	}
 }
 
-func cmdpwd(s []string) { fmt.Fprintf(os.Stdout, "/"+strings.Join(ns.Cwd,"/")+"\n") }
+func cmdpwd(s []string) { fmt.Fprintf(os.Stdout, "/"+strings.Join(ns.Cwd.Cname,"/")+"\n") }
 
 // Remove f from remote server
 func rmone(fname chan9.Elemlist) {

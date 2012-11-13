@@ -215,7 +215,7 @@ func (ns *Namespace) FWalk(e Elemlist) (*Fid, error) {
 	case '/':
 		fid = ns.Root
 	case '.':
-		fid = ns.WdFid
+		fid = ns.Cwd
 	default:
 		return nil, Enofile
 	}
@@ -233,7 +233,7 @@ func (ns *Namespace) FWalkTo(e Elemlist) (*Fid, error) {
 	case '/':
 		fid = ns.Root
 	case '.':
-		fid = ns.WdFid
+		fid = ns.Cwd
 	default:
 		return nil, Enofile
 	}
