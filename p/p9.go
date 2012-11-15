@@ -513,6 +513,8 @@ func NewFcall(sz uint32) *Fcall {
 }
 
 // Sets the tag of a Fcall.
+// It's the caller's responsibility to make sure all the'logical clients
+// sharing the same outgoing connection have different tags.
 func SetTag(fc *Fcall, tag uint16) {
 	fc.Tag = tag
 	pint16(tag, fc.Pkt[5:len(fc.Pkt)])

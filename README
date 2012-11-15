@@ -1,0 +1,83 @@
+Go9P is a pure go implementation of the 9P and 9P2000 (Styx / dot u extension) protocols.
+
+  For a general introduction to the 9p protocol and philosophy see:
+http://man.cat-v.org/plan_9/5/intro
+
+== What's Included ==
+
+  The basic package 'code.google.com/p/go9p/p' defines the Qid, Dir and Fcall
+structures.  These (mainly the latter) are used for (de)serializing
+(to)from the 9P 'on-wire' protocol representation.
+The Pack/Unpack functions can be listed with 'grep "func Pack" *.go'.
+
+  Three independent libraries (each with more/less working examples)
+are built on the basic package.  My favorites are the ramdisk server and
+cl shell-like client.  The clnt and chan9 libraries both implement
+basic client functionality for talking to network servers,
+such as would be expected on a Plan9 system (or via plan9port & co.).
+The chan9 library adds namespace functionality including mount and bind
+for re-organizing the file heirarchies of multiple servers.
+
+code.google.com/p/go9p/
+    p
+    ├── chan9
+    │   └── examples
+    │       ├── cl
+    │       ├── ls
+    │       ├── read
+    │       ├── tag
+    │       ├── tls
+    │       └── write
+    ├── clnt
+    │   └── examples
+    │       ├── cl
+    │       ├── ls
+    │       ├── read
+    │       ├── tag
+    │       ├── tls
+    │       └── write
+    └── srv
+        └── examples
+            ├── clonefs
+            ├── ramfs
+            ├── timefs
+            ├── tlsramfs
+            └── ufs
+
+== More About Plan 9 ==
+
+  The most up-to-date reference on 9p ideas can be found at: http://9p.cat-v.org
+
+  9P is /the/ network protocol used by the mythical Plan9 operating system.
+The big idea is that all resources, networked or local, can be represented as read/write
+operations on named hierarchies of objects.  Accessing those should be just as easy as
+accessing a file, and it shouldn't make any difference if the file represents a local
+or remote resource.  For modern re-inventions of this, see REST API design and FUSE.
+Although revolutionary in its scope, the OS was not initially released open
+source and required some effort in porting existing software, hindering
+widespread adoption.  Its relatively small following led Eric S. Raymond, one of its more vocal
+designers, to lament that "the most dangerous enemy of a better solution is an existing
+codebase that is just good enough.".
+After the decision to leave the personal computer
+and Unix networked server markets in 1996, AT&T divested the National Cash Register
+Corporation and spun-off Bell Labs as Lucent Technologies, Lucent gave Plan9 a back-seat and
+development slowly declined.  In 2002, Lucent made its last (4th edition)
+release of the Plan9 OS.  This coincides with the date that Rob Pike moved from
+Lucent to Google.  Its major issue is the lack of support for most
+hardware.  It spewed some random garbage and ground to a halt during boot on my system.
+
+  In 2011, a fork of the slowly developing v4 was made to allow faster
+development, addition of new hardware support, and a re-write of
+the fossil filesystem to the "Cached Write Once Read Many Filesystem."
+(http://www.sdtimes.com/link/35742)  All I know is that this one did
+boot on my (ca. 2002) hardware.
+
+https://code.google.com/p/plan9front/
+  
+  It's no doubt that the plan9 philosophy is perfectly suited for cloud
+computing.  Efforts in this direction have been made by go9p's
+originator Andrew Mirtchovski (http://mirtchovski.com/p9/9grid/).
+
+  For a list of 9P protocol implementations in other languages, see
+http://9p.cat-v.org/implementations
+
