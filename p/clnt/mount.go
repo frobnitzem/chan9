@@ -17,11 +17,13 @@ func (clnt *Clnt) Auth(user p.User, aname string) (*Fid, error) {
 	tc := clnt.NewFcall()
 	err := p.PackTauth(tc, fid.Fid, user.Name(), aname, uint32(user.Id()), clnt.Dotu)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 
 	_, err = clnt.Rpc(tc)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 
@@ -46,14 +48,17 @@ func (clnt *Clnt) Attach(afid *Fid, user p.User, aname string) (*Fid, error) {
 	tc := clnt.NewFcall()
 	err := p.PackTattach(tc, fid.Fid, afno, user.Name(), aname, uint32(user.Id()), clnt.Dotu)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 
 	rc, err := clnt.Rpc(tc)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 	if rc.Type == p.Rerror {
+		fid.Clunk()
 		return nil, &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
 	}
 
