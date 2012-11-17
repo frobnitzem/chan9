@@ -2,7 +2,6 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"fmt"
 	"strings"
 )
 
@@ -49,8 +48,9 @@ func (ns *Namespace) Mount(clnt *Clnt, afd *Fid, oldloc string, flags uint32, an
 	} else {
 		fid.Cname = fid.Cname[:1+len(clnt.Subpath)]
 	}
-	fid.Cname[0] = clnt.Id+":"
+	fid.Cname[0] = clnt.Id+"!"
 	copy(fid.Cname[1:], clnt.Subpath)
+
 	err = ns.Mnt.Mount(fid, parent, flags)
 	if err != nil {
 		parent.Clunk()
@@ -80,12 +80,14 @@ func (ns *Namespace) Bind(cname, pname string, flags uint32) error {
 	if err != nil {
 		return err
 	}
+	// The evaluation of new happens at the time of
+	// the bind, not when the binding is later used.
 	child, err := ns.FWalkTo(cpath)
 	if err != nil {
 		return err
 	}
 	// Handle special case of chroot-ing
-	if flags&p.MORDER == p.MREPL && parent.ID() == ns.Root.ID() {
+	if flags&p.MORDER == p.MREPL && parent.FileID == ns.Root.FileID {
 		ns.Mnt.Root = child.Dev
 		ns.Root.Clunk()
 		parent.Clunk()
@@ -108,10 +110,10 @@ func (ns *Namespace) LsMounts(path string) ([]string, []string, error) {
 	if err != nil {
 		return parents, children, err
 	}
-	for _, p := range ns.Mnt.Mounted(fid.Type, fid.Dev, fid.Qid) {
-		parents = append(parents, fmt.Sprintf("%#v", p))
+	for _, p := range ns.Mnt.Mounted(fid.FileID) {
+		parents = append(parents, strings.Join(p.Cname, "/"))
 	}
-	for c := ns.Mnt.CheckMount(fid.Type, fid.Dev, fid.Qid); c != nil; c=c.next {
+	for c := ns.Mnt.CheckMount(fid.FileID); c != nil; c=c.next {
 		children = append(children, strings.Join(c.Cname, "/"))
 	}
 	fid.Clunk()

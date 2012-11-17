@@ -12,7 +12,7 @@ type Elemlist struct {
         Mustbedir bool
 }
 
-func PathJoin(from, add []string) []string {
+func PathJoin(from, add []string, pfrom, padd []FileID) ([]string,[]FileID) {
 	var ndotdot int
 
 	for ndotdot=0; ndotdot < len(add); ndotdot++ {
@@ -20,16 +20,30 @@ func PathJoin(from, add []string) []string {
 			break
 		}
 	}
+
 	nkeep := len(from)-ndotdot
-	if nkeep < 0 {
+	if nkeep < 0 { // This means bad input
 		nkeep = 0
 	}
-
 	l := nkeep+len(add)-ndotdot
 	out := make([]string, l)
 	copy(out[:nkeep], from)
 	copy(out[nkeep:], add[ndotdot:])
-	return out
+
+	l = len(padd)
+	if ndotdot > l { // This means bad input
+		ndotdot = l
+	}
+	pkeep := len(pfrom)-ndotdot
+	if pkeep < 0 { // Also means bad input.
+		pkeep = 0
+	}
+	l = pkeep+l-ndotdot
+	pout := make([]FileID, l)
+	copy(pout[:pkeep], pfrom)
+	copy(pout[pkeep:], padd[ndotdot:])
+
+	return out, pout
 }
 
 /*
@@ -42,7 +56,7 @@ func (ns *Namespace) RootPath(path string) Elemlist {
 		e.Elems = PathJoin(ns.Cwd, e.Elems)
 		e.Ref = '/'
                 return e
-	} //default: // TODO -- implement # names
+	} //default: // implement # names?
         return e
 }*/
 

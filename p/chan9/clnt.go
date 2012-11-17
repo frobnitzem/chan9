@@ -84,6 +84,17 @@ type Req struct {
 	fid        *Fid
 }
 
+func PrintClntList() {
+	fmt.Printf("Connected Clients - Dev: name (refs)\n")
+	clnts.Lock()
+	defer clnts.Unlock()
+	for d, c := range clnts.c {
+		c.Lock()
+		fmt.Printf("  %d: %s (%d)\n", d, c.Id, c.ref)
+		c.Unlock()
+	}
+}
+
 func (clnt *Clnt) Rpcnb(r *Req) error {
 	var tag uint16
 
@@ -401,6 +412,7 @@ func (clnt *Clnt) FidAlloc() *Fid {
 	fid.Type = clnt.Type
 	fid.User = clnt.User
 	fid.Cname = make([]string, 0)
+	fid.Path = make([]FileID, 0)
 	clnt.incref()
 
 	return fid

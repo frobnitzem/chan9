@@ -12,6 +12,15 @@ import (
 // Opens the file associated with the fid. Returns nil if
 // the operation is successful.
 func (fid *Fid) Open(mode uint8) error {
+	if fid == nil {
+		return Ebaduse
+	}
+	if fid.next != nil || fid.prev != nil {
+		fn := func(f *Fid) error {
+			return f.Open(mode)
+		}
+		return fid.MUntil(fn)
+	}
 	tc := fid.Clnt.NewFcall()
 	err := p.PackTopen(tc, fid.Fid, mode)
 	if err != nil {
@@ -23,14 +32,6 @@ func (fid *Fid) Open(mode uint8) error {
 		return err
 	}
 	if rc.Type == p.Rerror {
-		if fid.next != nil {
-			nf, err := fid.MStep()
-			if err != nil {
-				return err
-			}
-			*fid = *nf
-			return fid.Open(mode)
-		}
 		return &p.Error{rc.Error, syscall.Errno(rc.Errornum)}
 	}
 
@@ -46,18 +47,31 @@ func (fid *Fid) Open(mode uint8) error {
 // Creates a file in the directory associated with the fid. Returns nil
 // if the operation is successful.
 func (fid *Fid) Create(name string, perm uint32, mode uint8, ext string) error {
+	if fid == nil {
+		return Ebaduse
+	}
 	if fid.prev != nil || fid.next != nil { // union
-		if !fid.MayCreate {
-			if fid.next == nil {
-				return &p.Error{"No writable directory in union", p.ENOENT}
+		f := fid
+		for ; f.next != nil; f=f.next {
+			if f.MayCreate {
+				break
 			}
-			nf, err := fid.MStep()
-			if err != nil {
-				return err
-			}
-			*fid = *nf
-			return fid.Create(name, perm, mode, ext)
 		}
+		if !f.MayCreate {
+			return &p.Error{"No writable directory in union", p.ENOENT}
+		}
+		nf, err := f.Clone(false)
+		if err != nil {
+			return err
+		}
+		err = nf.Create(name, perm, mode, ext)
+		if err != nil {
+			nf.Clunk()
+			return err
+		}
+		fid.Clunk()
+		*fid = *nf
+		return nil
 	}
 	tc := fid.Clnt.NewFcall()
 	err := p.PackTcreate(tc, fid.Fid, name, perm, mode, ext, fid.Clnt.Dotu)

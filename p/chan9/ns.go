@@ -19,9 +19,9 @@ import (
 // of the mounted p9 clients and the user's fid-s.
 type Namespace struct {
 	sync.Mutex
-	//Cwd        []string
-	Mnt	     *Mnttab
-	Root	     *Fid
+	//Cwd      []string
+	Mnt	   *Mnttab
+	Root	   *Fid
 	Cwd        *Fid
 	//Root       *NSElem // This one must be of type NSMOUNT, else there is no
 			   //    server to accept 9p messages.
@@ -76,10 +76,10 @@ func (ons *Namespace) clone() (*Namespace, error) {
 	ns.Root = ons.Root
 	//ns.Cwd = make([]string, len(ons.Cwd))
 	//copy(ns.Cwd, ons.Cwd)
-        ns.fidpool = newPool(p.NOFID) // FIXME -- walk(0) all fids
+        ns.fidpool = newPool(p.NOFID) // should walk(0) all fids
 	ons.Unlock()
 
-	clnts.Lock() // FIXME -- manage clnts more effectively
+	clnts.Lock() // should manage clnts more effectively
 	clnts.Unlock()
 
 	return ns, nil
@@ -97,13 +97,16 @@ const NOREMAP uint16 = 1<<15 // or-ed into Type field to ensure it's not the par
 type Fid struct {
 	sync.Mutex
 	Clnt   *Clnt // Client the fid belongs to
-	Cname	[]string
+	Cname	[]string // server!/subpath/path != Plan9
+	Path    []FileID // list of id-s ~ Plan9 Cname
 	Iounit uint32
-	Type uint16   // Channel type (index of function call table) -- FYI
+	FileID
+	/*Type uint16   // Channel type (index of function call table) -- FYI
 			// left-most bit indicates 'non-remappable' type/dev pair
 	Dev uint32    // Server or device number distinguishing the server from others of the same type
 			// duplicates Clnt * info
 	Qid p.Qid     // The Qid description for the file - direct inclusion conflicts, shadowing Type
+	*/
 	Mode   uint8  // Open mode (one of p.O* values) (if file is open)
 	Fid    uint32 // Fid number
 	p.User        // The user the fid belongs to

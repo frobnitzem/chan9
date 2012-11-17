@@ -41,8 +41,8 @@ func init() {
 	cmds["mkdir"]   = &Cmd{cmdmkdir, "mkdir dir [...]\t«create dir on remote server»"}
 	cmds["get"]     = &Cmd{cmdget, "get file [local]\t«get file from remote server»"}
 	cmds["put"]     = &Cmd{cmdput, "put file [remote]\t«put file on the remote server as 'file'»"}
-	cmds["mount"]   = &Cmd{cmdmount, "mount remote mountpoint\t«mount the remote server on mountpoint»"}
-	cmds["bind"]    = &Cmd{cmdbind, "bind target mountpoint\t«mount the target directory on mountpoint»"}
+	cmds["mount"]   = &Cmd{cmdmount, "mount [-bacCq] remote mountpoint\t«mount the remote server on mountpoint»"}
+	cmds["bind"]    = &Cmd{cmdbind, "bind [-bacq] target mountpoint\t«mount the target directory on mountpoint»"}
 	cmds["lsmount"] = &Cmd{cmdlsmount, "lsmount mountpoint\t«list the mounts from/to mountpoint»"}
 	cmds["umount"]  = &Cmd{cmdumount, "umount remote mountpoint\t«remove the given mount»"}
 	cmds["pwd"]     = &Cmd{cmdpwd, "pwd\t«print working directory»"}
@@ -349,18 +349,46 @@ func helpstring(cmd string) string {
 
 // Mount the given network name on mountpoint
 func cmdmount(s []string) {
-	if len(s) != 2 {
+	repterr := true
+	var opts uint32
+
+	l := len(s)
+	if l < 2 || l > 3 {
 		fmt.Fprintf(os.Stderr, "%s\n", helpstring("mount"))
 		return
 	}
+	
+	if l > 2 {
+		switch {
+		case strings.ContainsRune(s[0], 'b'):
+			opts = p.MBEFORE
+		case strings.ContainsRune(s[0], 'a'):
+			opts = p.MAFTER
+		}
+		if strings.ContainsRune(s[0], 'c') {
+			opts |= p.MCREATE
+		}
+		if strings.ContainsRune(s[0], 'C') {
+			opts |= p.MCACHE
+		}
+		if strings.ContainsRune(s[0], 'q') {
+			repterr = false
+		}
+	s = s[1:]
+	}
+
 	c, err := chan9.Dial(s[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening connection to %s: %s\n", s[0], err)
+		if repterr {
+			fmt.Fprintf(os.Stderr, "Error opening connection to %s: %s\n", s[0], err)
+		}
 		return
 	}
-	err = ns.Mount(c, nil, s[1], p.MBEFORE|p.MCREATE, "")
+	err = ns.Mount(c, nil, s[1], opts, "")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error mounting connection to %s: %s\n", s[0], err)
+		if repterr {
+			fmt.Fprintf(os.Stderr, "Error mounting connection to %s: %s\n", s[0], err)
+		}
 		c.Clunk(err)
 		return
 	}
@@ -368,13 +396,38 @@ func cmdmount(s []string) {
 
 // Mount the given dir on mountpoint
 func cmdbind(s []string) {
-	if len(s) != 2 {
+	repterr := true
+	var opts uint32
+
+	l := len(s)
+	if l < 2 || l > 3 {
 		fmt.Fprintf(os.Stderr, "%s\n", helpstring("bind"))
 		return
 	}
-	err := ns.Bind(s[0], s[1], p.MBEFORE)
+	
+	if l > 2 {
+		switch {
+		case strings.ContainsRune(s[0], 'b'):
+			opts = p.MBEFORE
+		case strings.ContainsRune(s[0], 'a'):
+			opts = p.MAFTER
+		}
+		if strings.ContainsRune(s[0], 'c') {
+			opts |= p.MCREATE
+		}
+		if strings.ContainsRune(s[0], 'C') {
+			opts |= p.MCACHE
+		}
+		if strings.ContainsRune(s[0], 'q') {
+			repterr = false
+		}
+	s = s[1:]
+	}
+	err := ns.Bind(s[0], s[1], opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error binding %s to %s: %s\n", s[1], s[0], err)
+		if repterr {
+			fmt.Fprintf(os.Stderr, "Error binding %s to %s: %s\n", s[1], s[0], err)
+		}
 		return
 	}
 }

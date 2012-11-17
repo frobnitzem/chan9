@@ -17,14 +17,29 @@ func (clnt *Clnt) Auth(user p.User, aname string) (*Fid, error) {
 	tc := clnt.NewFcall()
 	err := p.PackTauth(tc, fid.Fid, user.Name(), aname, uint32(user.Id()), clnt.Dotu)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 
-	_, err = clnt.Rpc(tc)
+	rc, err := clnt.Rpc(tc)
 	if err != nil {
+		fid.Clunk()
 		return nil, err
 	}
 
+	fid.Qid = rc.Qid
+	if cap(fid.Cname) < 1 {
+		fid.Cname = make([]string, 1)
+	} else {
+		fid.Cname = fid.Cname[:1]
+	}
+	fid.Cname[0] = aname
+	if cap(fid.Path) < 1 {
+		fid.Path = make([]FileID, 1)
+	} else {
+		fid.Path = fid.Path[:1]
+	}
+	fid.Path[0] = fid.FileID
 	fid.walked = true
 	return fid, nil
 }
@@ -58,6 +73,12 @@ func (clnt *Clnt) Attach(afid *Fid, user p.User, aname string) (*Fid, error) {
 
 	fid.Qid = rc.Qid
 	fid.Cname = fid.Cname[:0]
+	if cap(fid.Path) < 1 {
+		fid.Path = make([]FileID, 1)
+	} else {
+		fid.Path = fid.Path[:1]
+	}
+	fid.Path[0] = fid.FileID
 	fid.walked = true
 	return fid, nil
 }

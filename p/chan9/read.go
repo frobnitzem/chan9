@@ -83,6 +83,13 @@ func (file *File) Readn(buf []byte, offset uint64) (int, error) {
 	return ret, nil
 }
 
+/* TODO: make seek rewind dir-s
+func (file *File) Seek(off int) error {
+	if file.Fid.prev != nil {
+		file.MReset()
+	}
+} */
+
 // Reads the content of the directory associated with the File.
 // Returns an array of maximum num entries (if num is 0, returns
 // all entries from the directory). If the operation fails, returns
@@ -98,24 +105,27 @@ func (file *File) Readdir(num int) ([]*p.Dir, error) {
 		}
 
 		if n == 0 {
-			if file.Fid.next != nil {
-				file.Fid, err = file.Fid.MStep()
-				if err != nil {
-					return nil, err
-				}
-				file.Offset = 0
-				err := file.Fid.Open(p.OREAD)
-				if err != nil {
-					return nil, err
-				}
-				if cap(buf) < int(file.Fid.Clnt.Msize-p.IOHDRSZ) {
-					buf = make([]byte, file.Fid.Clnt.Msize-p.IOHDRSZ)
-				} else {
-					buf = buf[:file.Fid.Clnt.Msize-p.IOHDRSZ]
-				}
-				continue
+			if file.Fid.next == nil {
+				break
 			}
-			break
+			fid, err := file.Fid.next.Clone(true)
+			if err != nil {
+				return nil, err
+			}
+			err = fid.Open(p.OREAD)
+			if err != nil {
+				fid.Clunk()
+				return nil, err
+			}
+			file.Fid.Clunk()
+			file.Fid = fid
+			file.Offset = 0
+			if cap(buf) < int(fid.Clnt.Msize-p.IOHDRSZ) {
+				buf = make([]byte, fid.Clnt.Msize-p.IOHDRSZ)
+			} else {
+				buf = buf[:fid.Clnt.Msize-p.IOHDRSZ]
+			}
+			continue
 		}
 
 		for b := buf[0:n]; len(b) > 0; {
@@ -138,6 +148,5 @@ func (file *File) Readdir(num int) ([]*p.Dir, error) {
 			}
 		}
 	}
-
 	return dirs[0:pos], nil
 }

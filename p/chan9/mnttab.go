@@ -7,6 +7,7 @@ import (
 	"sync"
 	"code.google.com/p/go9p/p"
 	"fmt"
+	"strings"
 )
 
 type FileID struct {
@@ -27,30 +28,75 @@ type mntstack struct {
  * inside a linked-list of Fids (prev/next).
  */
 
+/* TODO: implement mutable mounts and intermediate folding
+   TODO: fix Umount in mount.go
+ */
+ 
 type Mnttab struct {
 	sync.Mutex
-	Parents  map[FileID][]FileID
+	Parents  map[FileID][]*Fid
 	Children map[FileID]*Fid
 	FromDev  map[uint32]*mntstack
 	ToDev    map[uint32]*mntstack
 	Root     uint32
 }
 
+func (f FileID) String() string {
+	return fmt.Sprintf("%d.%d.%d", f.Dev, f.Qid.Path, f.Qid.Version)
+}
+
+/* Note: Type is not currently implemented, so it's not printed.
+ */
 func (m *Mnttab) PrintMnttab() {
+	fmt.Printf("Mount Table:\n")
 	m.Lock()
 	defer m.Unlock()
-	fmt.Printf("Parents:\n  %v\nChildren:\n  %v\nFromDev:\n  %v\nToDev:\n  %v\n",
-		m.Parents,m.Children,m.FromDev,m.ToDev)
+	for p, c := range m.Children {
+		if c == nil {
+			continue
+		}
+		sp:="\t"
+		fmt.Printf("  %s ->", p.String())
+		for ; c != nil; c=c.next {
+			fmt.Printf("%s%s = %s\n", sp, c.FileID.String(),
+				   strings.Join(c.Cname,"/"))
+			sp = "\t\t"
+		}
+	}
+
+	fmt.Printf("  Parent Devices:")
+	for d, l := range m.FromDev {
+		if l == nil {
+			continue
+		}
+		i := 0
+		for ; l != nil; l=l.next {
+			i += 1
+		}
+		fmt.Printf(" %d(%d)", d, i)
+	}
+	fmt.Printf("\n")
+	fmt.Printf("  Child Devices:")
+	for d, l := range m.ToDev {
+		if l == nil {
+			continue
+		}
+		i := 0
+		for ; l != nil; l=l.next {
+			i += 1
+		}
+		fmt.Printf(" %d(%d)", d, i)
+	}
+	fmt.Printf("\n")
 }
 
 func NewMnttab(dev uint32) (*Mnttab) {
 	m := new(Mnttab)
 	m.Root = dev
 	m.Children = make(map[FileID]*Fid) // all 
-	m.Parents  = make(map[FileID][]FileID) // all mounts are union mounts.
+	m.Parents  = make(map[FileID][]*Fid) // all mounts are union mounts.
 	m.FromDev  = make(map[uint32]*mntstack)
 	m.ToDev  = make(map[uint32]*mntstack)
-	m.FromDev[dev] = nil
 	return m
 }
 
@@ -67,7 +113,7 @@ func (m *Mnttab) Umount(child, parent *Fid) error {
 		return Ebaduse
 	}
 
-	pid := parent.ID()
+	pid := parent.FileID
 	parent.Clunk()
 
 	c, ok := m.Children[pid]
@@ -75,18 +121,15 @@ func (m *Mnttab) Umount(child, parent *Fid) error {
 		return &p.Error{"mount not found", p.ENOENT}
 	}
 	if child == nil { // remove all mounts from parent, useful for remote fs
-		for s = s.push(pid, c.ID()); c.next != nil; c = c.next {
+		for s = s.push(pid, c.FileID); c.next != nil; c = c.next {
 		}
 	} else {
 		s = new(mntstack)
 		s.parent = pid
-		s.child = child.ID()
+		s.child = child.FileID
 		child.Clunk()
 	}
-	n := m.rm_mnt(s)
-	if n == 0 {
-		return &p.Error{"mount not found", p.ENOENT}
-	}
+	m.rm_mnt(s)
 
 	return nil
 }
@@ -100,6 +143,9 @@ func (s *mntstack) push(parent, child FileID) *mntstack {
 	sp.parent = parent
 	sp.child = child
 	sp.next = s
+	if s != nil {
+		s.prev = sp
+	}
 	return sp
 }
 // Traverse s to tack on sp.
@@ -133,31 +179,31 @@ func (s *mntstack) pop() (FileID, *Fid, *mntstack) {
  * Mnttab's lock has priority, and should be acquired
  * before Clntlist, if the latter is needed.
  */
-func (m *Mnttab) rm_mnt(s *mntstack) int {
-	var n int
-
+ // FIXME: ensure rm of parent from Parents[child]
+ //        targets a parent that is not self-referenced...
+func (m *Mnttab) rm_mnt(s *mntstack) {
 	for ; s != nil; s = s.next {
-		dev := s.parent.Dev
-		m.FromDev[dev] = m.FromDev[dev].remove_from(s.parent, s.child)
-		dev = s.child.Dev
-		m.ToDev[dev] = m.ToDev[dev].remove_from(s.parent, s.child)
-		if dev != m.Root && m.ToDev[dev] == nil { // no more links to the child's device
-			s = s.app(m.FromDev[dev])
+		if s.child.Type&NOREMAP == 0 {
+			dev := s.parent.Dev
+			m.FromDev[dev] = m.FromDev[dev].remove_from(s.parent, s.child)
+			dev = s.child.Dev
+			m.ToDev[dev] = m.ToDev[dev].remove_from(s.parent, s.child)
+			if dev != m.Root && m.ToDev[dev] == nil { // no more links to the child's device
+				s = s.app(m.FromDev[dev])
+			}
 		}
 
 		m.Parents[s.child] = remove_from_sl(m.Parents[s.child], s.parent)
-		clist, np := remove_from_union(m.Children[s.parent], s.child)
-		n += np
+		clist := remove_from_union(m.Children[s.parent], s.child)
 		if clist != nil && clist.next == nil {
-			cp := clist.ID()
+			cp := clist.FileID
 			cp.Type &= ^NOREMAP
 			if cp == s.parent {
-				clist = nil // remove self-shadows.
+				s=s.push(cp,cp) // remove self-shadows.
 			}
 		}
 		m.Children[s.parent] = clist
 	}
-	return n
 }
 
 /*  Note that you cannot clunk a (parent or child) fid once it's sent to Mount.
@@ -168,102 +214,119 @@ func (m *Mnttab) Mount(child, parent *Fid, flags uint32) error {
 	var err error
 
 	/* Sanity checks. */
-	if parent == nil || child == nil {
+	if parent == nil {
+		if child == nil {
+			return Ebaduse
+		}
+		child.Clunk()
+		return Ebaduse
+	}
+	if child == nil {
+		parent.Clunk()
 		return Ebaduse
 	}
 	if parent.Qid.Type&p.QTDIR == 0 && flags&p.MORDER != p.MREPL {
-		child.Clunk()
-		parent.Clunk()
-		return &p.Error{"Cannot union mount a file, only a dir.", p.EINVAL}
+		err = &p.Error{"Cannot union mount a file, only a dir.", p.EINVAL}
+		goto error
+	}
+	if (parent.Qid.Type&p.QTDIR) ^ (child.Qid.Type&p.QTDIR) != 0 {
+		err = &p.Error{"Parent and child must both be either files or dirs.", p.EINVAL}
+		goto error
 	}
 	if parent.prev != nil || parent.next != nil {
-		child.Clunk()
-		parent.Clunk()
-		return &p.Error{"Cannot mount from a union, only a single fileid.", p.EINVAL}
+		err = &p.Error{"Cannot mount from a union, only a single fileid.", p.EINVAL}
+		goto error
 	}
 	if child.prev != nil || child.next != nil {
-		child.Clunk()
-		parent.Clunk()
-		return &p.Error{"Cannot mount a union, only a single fileid.", p.EINVAL}
+		err = &p.Error{"Cannot mount a union, only a single fileid.", p.EINVAL}
+		goto error
 	}
 
 	m.Lock()
 	defer m.Unlock()
 
-	pid := parent.ID()
-	ch, ok := m.Children[pid]
-	cid := child.ID()
-
-	// Update Device Listings
-	fdev, ok := m.FromDev[pid.Dev]
-	tdev := m.ToDev[cid.Dev]
-	if !ok {
+	// Require some ref. of parent's dev.
+	if parent.Dev != m.Root && m.ToDev[parent.Dev] == nil  {
 		err = &p.Error{"Cannot mount from a nonexistent device", p.ENOSYS}
-		goto err
+		goto error
 	}
-	child.prev = nil
+	goto fine
+error:
+	child.Clunk()
+	parent.Clunk()
+	return err
+fine:
+
+	pid := parent.FileID
+	cid := child.FileID
+
+	// Update Device Listings - ensuring the present mount isn't
+	// GC-ed during Mount.
 	child.MayCreate = flags&p.MCREATE != 0
 	child.MayCache = flags&p.MCACHE != 0
 
-	m.FromDev[pid.Dev] = fdev.push(pid, cid)
-	m.ToDev[child.Dev] = tdev.push(pid, cid)
+	m.FromDev[pid.Dev] = m.FromDev[pid.Dev].push(pid, cid)
+	m.ToDev[  cid.Dev] = m.ToDev[  cid.Dev].push(pid, cid)
 
 	// Update parent table
 	if pl := m.Parents[cid]; pl == nil {
-		m.Parents[cid] = make([]FileID, 1)
-		m.Parents[cid][0] = pid
+		m.Parents[cid] = make([]*Fid, 1)
+		m.Parents[cid][0] = parent
 	} else {
-		m.Parents[cid] = append(pl, pid)
+		m.Parents[cid] = append(pl, parent)
 	}
 
 	// Update child table
+	ch  := m.Children[pid]
 	if flags&p.MORDER == p.MREPL {
-		if ok { // unlink old.
-			var s *mntstack
-			for ; ch != nil; ch=ch.next {
-				s = s.push(pid, ch.ID())
-			}
-			m.rm_mnt(s)
+		var s *mntstack // unlink old.
+		for ; ch != nil; ch=ch.next {
+			s = s.push(pid, ch.FileID)
+		}
+		m.rm_mnt(s)
+
+		if pid == cid { // self-replace.
+			child.Type |= NOREMAP
 		}
 		m.Children[pid] = child
-		parent.Clunk()
 	} else {
+		var lst *Fid // last child in existing union
+
 		if ch == nil {
 			parent.Type |= NOREMAP
 			parent.MayCreate = true
 			parent.MayCache = child.MayCache
 			m.Children[pid] = parent
 			ch = parent
-		} else {
-			parent.Clunk()
+			lst = parent
+			// special case for parent GC, but this extra ref is
+		} else { // redundant and simply ignored by rm_mnt
+			var s *mntstack // for removing duplicate parent,child mnt
+			for lst=ch; lst.next != nil; lst=lst.next {
+				if lst.FileID == cid {
+					s = s.push(pid, cid)
+				}
+			}
+			m.rm_mnt(s)
 		}
+
 		switch flags&p.MORDER {
 		case p.MAFTER:
-			for ; ch.next != nil; ch=ch.next {
-			}
-			child.prev = ch
-			ch.next = child
+			child.prev = lst
+			lst.next = child
 		case p.MBEFORE:
 			child.next = ch
 			m.Children[pid] = child
 		}
 	}
 	return nil
-err:
-	child.Clunk()
-	parent.Clunk()
-	return err
 }
 
 /*  Check whether the given Fid is mounted,
     returning a slice of unions or nil.
+    TODO: Make this loop and remove/combine intermediates (against Plan9 Spec)
  */
-func (m *Mnttab) CheckMount(Type uint16, dev uint32, qid p.Qid) *Fid {
-	var id FileID
-	id.Dev = dev
-	id.Type = Type
-	id.Qid = qid
-
+func (m *Mnttab) CheckMount(id FileID) *Fid {
 	m.Lock()
 	c := m.Children[id]
 	m.Unlock()
@@ -272,12 +335,13 @@ func (m *Mnttab) CheckMount(Type uint16, dev uint32, qid p.Qid) *Fid {
 
 /*  List Parents of the current Fid (those mounting Fid).
  */
-func (m *Mnttab) Mounted(Type uint16, dev uint32, qid p.Qid) []FileID {
-	var id FileID
-	id.Type = Type
-	id.Dev = dev
-	id.Qid = qid
+func (m *Mnttab) CheckParent(parent, child FileID) *Fid {
+	return nil // FIXME!
+}
 
+/*  List Parents of the current Fid (those mounting Fid).
+ */
+func (m *Mnttab) Mounted(id FileID) []*Fid {
 	m.Lock()
 	c := m.Parents[id]
 	m.Unlock()
@@ -285,7 +349,6 @@ func (m *Mnttab) Mounted(Type uint16, dev uint32, qid p.Qid) []FileID {
 }
 
 /*  Pull a FileID from a Fid
- */
 func (f *Fid) ID() FileID {
 	var id FileID
 	id.Type    = f.Type
@@ -293,6 +356,7 @@ func (f *Fid) ID() FileID {
 	id.Qid     = f.Qid
 	return id
 }
+ */
 
 /* Unlink the children of the current NSElem,
    and remove loc->c (client connection) if not NSUNION.
@@ -316,37 +380,39 @@ func (ns *Namespace) unlink(loc *NSElem) {
 
 /* Generic function to remove val from slice.
  */
-func remove_from_sl(slice []FileID, val FileID) []FileID {
+func remove_from_sl(slice []*Fid, val FileID) []*Fid {
         var off int
         for i, v := range slice {
                 slice[i-off] = slice[i]
-                if v == val {
+                if off == 0 && v.FileID == val {
                         off++
                 }
         }
+	if off == 0 {
+		fmt.Printf("Error! tried to remove absentee fid from slice.\n")
+	}
         return slice[:len(slice)-off]
 }
 
 /* Called with lock held.
  */
 func (s *mntstack) remove_from(parent, child FileID) (*mntstack) {
-	var prev, ns *mntstack
-	
-	if s != nil {
-		prev = s.prev
+	if s == nil {
+		fmt.Printf("Error! tried to remove fid from non-existant mntstack.\n")
+		return s
 	}
-	for s != nil  {
-		if s.parent != parent || s.child != child {
-			break
+	if s.parent == parent && s.child == child {
+		next := s.next
+		if next != nil {
+			next.prev = s.prev
 		}
-		s = s.next
-	}
-	if s != nil {
-		s.prev = prev
+		/* if s.prev != nil {
+			s.prev.next = next
+		} */
+		return next
 	}
 	head := s
-        for s != nil {
-		ns = s.next
+        for s=s.next; s != nil; s=s.next {
                 if s.parent == parent && s.child == child {
 			if s.prev != nil {
 				s.prev.next = s.next
@@ -354,36 +420,33 @@ func (s *mntstack) remove_from(parent, child FileID) (*mntstack) {
 			if s.next != nil {
 				s.next.prev = s.prev
 			}
+			return head
 		}
-		s = ns
         }
+	fmt.Printf("Error! tried to remove absentee fid from mntstack.\n")
         return head
 }
 
-func remove_from_union(s *Fid, v FileID) (*Fid, int) {
-	var n int
-	var prev *Fid
-	var next *Fid
-	
-	if s != nil {
-		prev = s.prev
+// Remove the first elem. from the union.
+func remove_from_union(s *Fid, v FileID) *Fid {
+	if s == nil {
+		fmt.Printf("Error! tried to remove fid from non-existant union.\n")
+		return s
 	}
-	for s != nil  {
-		if s.ID() != v {
-			break
+	if s.FileID == v {
+		next := s.next
+		if next != nil {
+			next.prev = s.prev
 		}
-		n += 1
-		next = s.next
+		/* if s.prev != nil {
+			s.prev.next = next
+		} */
 		s.Clunk()
-		s = next
-	}
-	if s != nil {
-		s.prev = prev
+		return next
 	}
 	head := s
-        for s != nil {
-		next = s.next
-                if s.ID() == v {
+        for s=s.next; s != nil; s=s.next {
+                if s.FileID == v {
 			if s.prev != nil {
 				s.prev.next = s.next
 			}
@@ -391,11 +454,11 @@ func remove_from_union(s *Fid, v FileID) (*Fid, int) {
 				s.next.prev = s.prev
 			}
 			s.Clunk()
-			n += 1
+			return head
 		}
-		s = next
         }
-        return head, n
+	fmt.Printf("Error! tried to remove absentee fid from union.\n")
+        return head
 }
 
 // Todo - check for cycles.
