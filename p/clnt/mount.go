@@ -21,12 +21,13 @@ func (clnt *Clnt) Auth(user p.User, aname string) (*Fid, error) {
 		return nil, err
 	}
 
-	_, err = clnt.Rpc(tc)
+	rc, err := clnt.Rpc(tc)
 	if err != nil {
 		fid.Clunk()
 		return nil, err
 	}
 
+	fid.Qid = rc.Qid
 	fid.User = user
 	fid.walked = true
 	return fid, nil
