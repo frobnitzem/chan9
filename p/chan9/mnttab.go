@@ -29,7 +29,7 @@ type mntstack struct {
  */
 
 /* TODO: implement mutable mounts and intermediate folding
-   TODO: fix Umount in mount.go
+   TODO: fix Umount in mount.go to allow 'all parent' unmounting
  */
  
 type Mnttab struct {
@@ -42,7 +42,18 @@ type Mnttab struct {
 }
 
 func (f FileID) String() string {
-	return fmt.Sprintf("%d.%d.%d", f.Dev, f.Qid.Path, f.Qid.Version)
+	s := ""
+	if f.Type& NOREMAP != 0 {
+		s = "*"
+	}
+	if f.Type&^NOREMAP != 0 {
+		s += fmt.Sprintf("(%d)", f.Type)
+	}
+	s += fmt.Sprintf("%d:%d", f.Dev, f.Qid.Path)
+	if f.Qid.Version != 0 {
+		s += fmt.Sprintf(".%d", f.Qid.Version)
+	}
+	return s
 }
 
 /* Note: Type is not currently implemented, so it's not printed.
@@ -179,30 +190,28 @@ func (s *mntstack) pop() (FileID, *Fid, *mntstack) {
  * Mnttab's lock has priority, and should be acquired
  * before Clntlist, if the latter is needed.
  */
- // FIXME: ensure rm of parent from Parents[child]
- //        targets a parent that is not self-referenced...
 func (m *Mnttab) rm_mnt(s *mntstack) {
-	for ; s != nil; s = s.next {
-		if s.child.Type&NOREMAP == 0 {
-			dev := s.parent.Dev
-			m.FromDev[dev] = m.FromDev[dev].remove_from(s.parent, s.child)
-			dev = s.child.Dev
-			m.ToDev[dev] = m.ToDev[dev].remove_from(s.parent, s.child)
-			if dev != m.Root && m.ToDev[dev] == nil { // no more links to the child's device
-				s = s.app(m.FromDev[dev])
-			}
-		}
+	var is_noremap bool // mounts with noremap parents immediately precede self mounts
 
-		m.Parents[s.child] = remove_from_sl(m.Parents[s.child], s.parent)
-		clist := remove_from_union(m.Children[s.parent], s.child)
-		if clist != nil && clist.next == nil {
-			cp := clist.FileID
-			cp.Type &= ^NOREMAP
-			if cp == s.parent {
-				s=s.push(cp,cp) // remove self-shadows.
-			}
+	for ; s != nil; s = s.next {
+		is_noremap = s.parent.Type&NOREMAP != 0
+
+		//if s.child.Type&NOREMAP == 0 { // NOREMAP-S should never get added to rm_mnt!
+		dev := s.parent.Dev
+		m.FromDev[dev] = m.FromDev[dev].remove_from(s.parent, s.child)
+		dev = s.child.Dev
+		m.ToDev[dev] = m.ToDev[dev].remove_from(s.parent, s.child)
+		if dev != m.Root && m.ToDev[dev] == nil { // no more links to the child's device
+			s = s.app(m.FromDev[dev])
 		}
-		m.Children[s.parent] = clist
+		//}
+		
+		m.Parents[s.child] = remove_from_sl(m.Parents[s.child], s.parent)
+		clist := m.Children[s.parent]
+		if is_noremap { // silently discard remapped parent, but don't Clunk.
+			clist = remove_from_union(clist, s.parent, false)
+		}
+		m.Children[s.parent] = remove_from_union(clist, s.child, true)
 	}
 }
 
@@ -259,6 +268,11 @@ fine:
 
 	pid := parent.FileID
 	cid := child.FileID
+	ch  := m.Children[pid]
+	// This requires a special kind of mount.
+	if ch == nil && flags&p.MORDER != p.MREPL {
+		parent.Type |= NOREMAP
+	}
 
 	// Update Device Listings - ensuring the present mount isn't
 	// GC-ed during Mount.
@@ -277,7 +291,6 @@ fine:
 	}
 
 	// Update child table
-	ch  := m.Children[pid]
 	if flags&p.MORDER == p.MREPL {
 		var s *mntstack // unlink old.
 		for ; ch != nil; ch=ch.next {
@@ -333,10 +346,23 @@ func (m *Mnttab) CheckMount(id FileID) *Fid {
 	return c
 }
 
-/*  List Parents of the current Fid (those mounting Fid).
+/*  Check parents for those with a matching FileID
+    to decide whether to step back through a mount.
  */
 func (m *Mnttab) CheckParent(parent, child FileID) *Fid {
-	return nil // FIXME!
+	mask_id := FileID{parent.Type|NOREMAP, parent.Dev, parent.Qid}
+	ck_equiv := func(p FileID) bool {
+		p.Type |= NOREMAP
+		return p == mask_id
+	}
+	fmt.Printf("Checking Parents for %v against %v\n", child, parent)
+	for _, p := range(m.Parents[child]) {
+		fmt.Printf("  %v\n", p.FileID)
+		if ck_equiv(p.FileID) {
+			return p
+		}
+	}
+	return nil
 }
 
 /*  List Parents of the current Fid (those mounting Fid).
@@ -385,6 +411,7 @@ func remove_from_sl(slice []*Fid, val FileID) []*Fid {
         for i, v := range slice {
                 slice[i-off] = slice[i]
                 if off == 0 && v.FileID == val {
+			v.Clunk()
                         off++
                 }
         }
@@ -428,7 +455,7 @@ func (s *mntstack) remove_from(parent, child FileID) (*mntstack) {
 }
 
 // Remove the first elem. from the union.
-func remove_from_union(s *Fid, v FileID) *Fid {
+func remove_from_union(s *Fid, v FileID, clunk bool) *Fid {
 	if s == nil {
 		fmt.Printf("Error! tried to remove fid from non-existant union.\n")
 		return s
@@ -441,7 +468,9 @@ func remove_from_union(s *Fid, v FileID) *Fid {
 		/* if s.prev != nil {
 			s.prev.next = next
 		} */
-		s.Clunk()
+		if clunk {
+			s.Clunk()
+		}
 		return next
 	}
 	head := s
@@ -453,7 +482,9 @@ func remove_from_union(s *Fid, v FileID) *Fid {
 			if s.next != nil {
 				s.next.prev = s.prev
 			}
-			s.Clunk()
+			if clunk {
+				s.Clunk()
+			}
 			return head
 		}
         }

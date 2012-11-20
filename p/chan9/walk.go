@@ -6,6 +6,7 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
+	"fmt"
 	"syscall"
 )
 
@@ -49,11 +50,19 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 		newfid.Type = fid.Type
 		newfid.Qid = qid
 		newfid.Cname, newfid.Path = PathJoin(fid.Cname, wnames,
-				fid.Path, fid.Type,fid.Dev,rc.Wqid)
+				fid.Path, fileid_list(fid.Type,fid.Dev,rc.Wqid))
 		newfid.walked = true
 	}
 
 	return rc.Wqid, nil
+}
+
+func fileid_list(Type uint16, Dev uint32, qids []p.Qid) []FileID {
+	path := make([]FileID, len(qids))
+	for i,q := range qids {
+		path[i] = FileID{Type, Dev, q}
+	}
+	return path
 }
 
 /*  Wrapper for fid.Walk to walk only zero steps, and not
@@ -88,15 +97,20 @@ func (ns *Namespace) WalkDotDot(fid *Fid) (*Fid, error) {
 		return nil, Ebaduse
 	}
 	l := len(fid.Path)
+	fmt.Printf("Walking .. from cname: %v, path: %v\n", fid.Cname, fid.Path)
 	if l < 2 {
 		return fid.Clone(true)
 	}
-	pfid := ns.Mnt.CheckParent(fid.Path[l-2], fid.FileID)
-	if pfid != nil {
-		return pfid.WalkOne("..")
+	pfid := ns.Mnt.CheckParent(fid.Path[l-1], fid.FileID)
+	if pfid == nil {
+		return fid.WalkOne("..")
 	}
-	// FIXME: Copy old fid's shortened path.
-	return fid.WalkOne("..")
+	nfid, err := pfid.WalkOne("..")
+	if err != nil {
+		return nil, err
+	}
+	nfid.Path = append(nfid.Path[:0], fid.Path[:len(fid.Path)-1]...)
+	return nfid, nil
 }
 
 /*  Wrapper for fid.Walk to walk only one step, and not
@@ -223,14 +237,20 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 	if fid == nil {
 		return nil, Ebaduse
 	}
-	for ; len(wnames)>0 && wnames[0] == ".."; wnames=wnames[1:] {
-		fid, err := ns.WalkDotDot(fid)
+	fmt.Printf("Walking %v\n", wnames)
+	if len(wnames)>0 && wnames[0] == ".." {
+		fid, err = ns.WalkDotDot(fid)
 		if err != nil {
 			return nil, err
 		}
+		rfid, err := ns.Walk(fid, wnames[1:])
+		fid.Clunk()
+		return rfid, err
 	}
 
 	newfid := fid.Clnt.FidAlloc()
+	path := fid.Path
+	fmt.Printf("Starting at path: %v\n", path)
 
 	for { // step in blocks of 16 path elems
 		n := len(wnames)
@@ -238,6 +258,9 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 			n = 16
 		}
 
+		fid.Type &= ^NOREMAP
+		Type := fid.Type
+		Dev := fid.Dev
 		wqid, err = fid.Walk(newfid, wnames[0:n])
 		if err != nil || (n > 0 && len(wqid) == 0) {
 			if fid.next != nil { // Unionized.
@@ -265,13 +288,13 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 				continue
 			}
 			fid = c
-			// FIXME: copy old fid's partial Path.
 			newfid.Clunk() // the fid churn is to satisfy incref/decref
 			newfid = fid.Clnt.FidAlloc()
 			break
 		}
 		if i < len(wqid) { // replaced by a mount point
 			n = i+1
+			path = append(path, fileid_list(Type, Dev, wqid[:n])...)
 			wnames = wnames[n:]
 			continue // ensures we clone the client fid.
 		}
@@ -281,13 +304,16 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 			goto error
 		}
 
+		path = append(path, fileid_list(Type, Dev, wqid[:n])...)
 		wnames = wnames[n:]
 		fid = newfid
 		if len(wnames) == 0 {
 			break
 		}
 	}
+	fmt.Printf("Ending at path: %v\n", path)
 
+	newfid.Path = path
 	return newfid, nil
 
 error:

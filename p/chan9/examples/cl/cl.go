@@ -43,6 +43,7 @@ func init() {
 	cmds["put"]     = &Cmd{cmdput, "put file [remote]\t«put file on the remote server as 'file'»"}
 	cmds["mount"]   = &Cmd{cmdmount, "mount [-bacCq] remote mountpoint\t«mount the remote server on mountpoint»"}
 	cmds["bind"]    = &Cmd{cmdbind, "bind [-bacq] target mountpoint\t«mount the target directory on mountpoint»"}
+	cmds["netstat"] = &Cmd{cmdnetstat, "netstat\t«list open connections and reference numbers»"}
 	cmds["lsmount"] = &Cmd{cmdlsmount, "lsmount mountpoint\t«list the mounts from/to mountpoint»"}
 	cmds["umount"]  = &Cmd{cmdumount, "umount remote mountpoint\t«remove the given mount»"}
 	cmds["pwd"]     = &Cmd{cmdpwd, "pwd\t«print working directory»"}
@@ -430,6 +431,10 @@ func cmdbind(s []string) {
 		}
 		return
 	}
+}
+
+func cmdnetstat(s []string) {
+	chan9.PrintClntList()
 }
 
 // List the mounts from/to the given dir.
