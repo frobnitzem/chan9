@@ -6,7 +6,6 @@ package chan9
 
 import (
 	"code.google.com/p/go9p/p"
-	"fmt"
 	"syscall"
 )
 
@@ -47,10 +46,11 @@ func (fid *Fid) Walk(newfid *Fid, wnames []string) ([]p.Qid, error) {
 			qid = fid.Qid
 		}
 		newfid.Clnt = fid.Clnt
-		newfid.Type = fid.Type
+		newfid.Type = fid.Type&^NOREMAP
+		newfid.Dev = fid.Dev
 		newfid.Qid = qid
 		newfid.Cname, newfid.Path = PathJoin(fid.Cname, wnames,
-				fid.Path, fileid_list(fid.Type,fid.Dev,rc.Wqid))
+				fid.Path, fileid_list(newfid.Type,newfid.Dev,rc.Wqid))
 		newfid.walked = true
 	}
 
@@ -97,7 +97,6 @@ func (ns *Namespace) WalkDotDot(fid *Fid) (*Fid, error) {
 		return nil, Ebaduse
 	}
 	l := len(fid.Path)
-	fmt.Printf("Walking .. from cname: %v, path: %v\n", fid.Cname, fid.Path)
 	if l < 2 {
 		return fid.Clone(true)
 	}
@@ -237,7 +236,6 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 	if fid == nil {
 		return nil, Ebaduse
 	}
-	fmt.Printf("Walking %v\n", wnames)
 	if len(wnames)>0 && wnames[0] == ".." {
 		fid, err = ns.WalkDotDot(fid)
 		if err != nil {
@@ -250,7 +248,6 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 
 	newfid := fid.Clnt.FidAlloc()
 	path := fid.Path
-	fmt.Printf("Starting at path: %v\n", path)
 
 	for { // step in blocks of 16 path elems
 		n := len(wnames)
@@ -258,8 +255,7 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 			n = 16
 		}
 
-		fid.Type &= ^NOREMAP
-		Type := fid.Type
+		Type := fid.Type&^NOREMAP
 		Dev := fid.Dev
 		wqid, err = fid.Walk(newfid, wnames[0:n])
 		if err != nil || (n > 0 && len(wqid) == 0) {
@@ -311,7 +307,6 @@ func (ns *Namespace) Walk(fid *Fid, wnames []string) (*Fid, error) {
 			break
 		}
 	}
-	fmt.Printf("Ending at path: %v\n", path)
 
 	newfid.Path = path
 	return newfid, nil
